@@ -1,0 +1,183 @@
+#!/bin/sh
+# List the Contentful pages that mention a term.
+#
+# Usage: list-matches [--notes] [--by-matches] [--from N] [--top N] TERM [TYPE]
+#
+# TERM matches whole words, ignoring case; separate alternatives with "|".
+# TYPE is a configured Contentful space ID. Without TYPE, the script
+# prints how many pages of each type match, unless --by-matches asks for one ranked list.
+#
+# Entries are ordered newest first unless --by-matches is provided.
+# --by-matches orders any search by mentions. Results come 50 at a time (--top changes
+# the size); --from N starts at the Nth result.
+#
+# Each page file starts with metadata lines between "---" lines, then one "## /<field>"
+# section per text field. Matches are counted in the text, not the metadata.
+
+set -eu
+
+root=${CONTENTFUL_DIR:-/contentful}
+notes=0
+bymatches=0
+from=1
+top=50
+
+usage() {
+  echo "Usage: list-matches [--notes] [--by-matches] [--from N] [--top N] TERM [TYPE]" >&2
+  exit 2
+}
+
+# Options can come before or after the term and type.
+query=""
+type=""
+count=0
+while [ $# -gt 0 ]; do
+  case $1 in
+    --notes) notes=1 ;;
+    --by-matches) bymatches=1 ;;
+    --from | --top)
+      [ $# -ge 2 ] || usage
+      case $2 in '' | *[!0-9]* | 0) usage ;; esac
+      if [ "$1" = --from ]; then from=$2; else top=$2; fi
+      shift
+      ;;
+    -*) usage ;;
+    *)
+      count=$((count + 1))
+      if [ "$count" -eq 1 ]; then query=$1; elif [ "$count" -eq 2 ]; then type=$1; else usage; fi
+      ;;
+  esac
+  shift
+done
+[ "$count" -ge 1 ] || usage
+
+if [ ! -f "$root/manifest.json" ]; then
+  echo "The Contentful files aren't available in this session. Search Contentful directly with the search_contentful_entries tool." >&2
+  exit 1
+fi
+synced=$(sed -n 's/.*"syncedAt": *"\([^"]*\)".*/\1/p' "$root/manifest.json")
+
+if [ -n "$type" ] && [ ! -d "$root/$type" ]; then
+  echo "Unknown type \"$type\". Use a space directory listed under /contentful." >&2
+  exit 2
+fi
+
+# Lowercase the term, drop empty alternatives, and escape regex characters other than "|".
+term=$(printf '%s' "$query" | tr '[:upper:]' '[:lower:]' |
+  sed -e 's/||*/|/g' -e 's/^|//' -e 's/|$//' -e 's/[.+*?(){}^$[\\]/\\&/g')
+[ -n "$term" ] || usage
+LIST_MATCHES_RE="(^|[^a-z0-9_])($term)([^a-z0-9_]|\$)"
+export LIST_MATCHES_RE
+
+if [ -n "$type" ]; then pattern="$root/$type/*.md"; else pattern="$root/*/*.md"; fi
+# shellcheck disable=SC2086 # The pattern is expanded on purpose.
+set -- $pattern
+[ -e "$1" ] || set --
+searched=$#
+
+# With k=0, print one tab-separated line per matching page: matching lines, date, status,
+# title, link, file. Otherwise print each page's details, its opening text, and up to k
+# passages that mention the term.
+program='
+function link() { return (status == "draft" || url == "null") ? cms : url }
+function done() {
+  if (file == "" || !(n || inmeta)) return
+  if (k == 0) {
+    printf "%d\t%s\t%s\t%s\t%s\t%s\n", n, substr(date, 1, 10), status, title, link(), file
+    return
+  }
+  if (intro == "") intro = plain
+  if (out == "" && short != "") out = "match: " short "\n"
+  printf "== %s\ntitle: %s\nstatus: %s\ndate: %s\nlink: %s\nmatching lines: %d\n", file, title, status, substr(date, 1, 10), link(), n
+  if (intro != "") print "intro: " intro
+  printf "%s", out
+}
+BEGIN { re = ENVIRON["LIST_MATCHES_RE"] }
+FNR == 1 {
+  done()
+  file = FILENAME; meta = n = shown = inmeta = 0
+  intro = plain = out = short = title = status = url = cms = date = published = updated = ""
+}
+FNR == 1 && $0 == "---" { meta = 1; next }
+meta {
+  if ($0 == "---") {
+    meta = 0
+    if (date == "" || date == "null") date = published
+    if (date == "" || date == "null") date = updated
+    if (date == "null") date = ""
+    next
+  }
+  value = $0; sub(/^[a-zA-Z]+: "?/, "", value); sub(/"$/, "", value)
+  if ($1 == "title:") title = value
+  else if ($1 == "status:") status = value
+  else if ($1 == "url:") url = value
+  else if ($1 == "contentfulUrl:") cms = value
+  else if ($1 == "date:") date = value
+  else if ($1 == "publishedAt:") published = value
+  else if ($1 == "updatedAt:") updated = value
+  if ($1 ~ /^(title|slug|url):$/ && tolower(value) ~ re) inmeta = 1
+  next
+}
+/^## \// || $0 == "" { next }
+{
+  isintro = 0
+  if (intro == "" && length($0) >= 80) { intro = substr($0, 1, 200); isintro = 1 }
+  if (match(tolower($0), re)) {
+    n++
+    if (length($0) < 40) { if (short == "") short = $0 }
+    else if (!(isintro && RSTART + RLENGTH <= 201) && ++shown <= k)
+      out = out "match: " substr($0, RSTART > 100 ? RSTART - 100 : 1, 240) "\n"
+  } else if (plain == "") plain = substr($0, 1, 200)
+}
+END { done() }
+'
+
+if [ "$searched" -eq 0 ]; then
+  lines=""
+else
+  lines=$(awk -v k=0 "$program" "$@")
+fi
+total=$(printf '%s' "$lines" | grep -c . || true)
+footer="files last updated from Contentful at ${synced:-an unknown time}"
+pages() { if [ "$1" -eq 1 ]; then echo "1 ${2:-}page"; else echo "$1 ${2:-}pages"; fi; }
+
+# Without a type, summarize matches per type unless a ranked list was asked for.
+if [ -z "$type" ] && [ "$bymatches" -eq 0 ]; then
+  if [ "$total" -gt 0 ]; then
+    printf '%s\n' "$lines" | awk -F '\t' '{ n = split($6, p, "/"); print p[n - 1] }' |
+      sort | uniq -c | while read -r count name; do
+        printf '%s\t%s\n' "$name" "$(pages "$count" "matching ")"
+      done
+  fi
+  echo "# $(pages "$total" "matching ") across $(pages "$searched"); $footer"
+  exit 0
+fi
+
+tab=$(printf '\t')
+if [ "$bymatches" -eq 1 ]; then
+  order="-k1,1nr -k2,2r"
+else
+  order="-k2,2r -k1,1nr"
+fi
+# shellcheck disable=SC2086 # The sort keys are split on purpose.
+page=$(printf '%s\n' "$lines" | grep . | sort -t "$tab" $order |
+  sed -n "${from},$((from + top - 1))p" || true)
+shown=$(printf '%s' "$page" | grep -c . || true)
+
+if [ "$shown" -gt 0 ]; then
+  if [ "$notes" -eq 1 ]; then
+    # Two passages each keep notes for 25 pages well under the output limit; use one for more.
+    if [ "$shown" -le 25 ]; then k=2; else k=1; fi
+    printf '%s\n' "$page" | cut -f6 | xargs awk -v k="$k" "$program"
+  else
+    printf '%s\n' "$page"
+  fi
+fi
+
+if [ "$total" -eq 0 ]; then
+  echo "# No matching pages among $(pages "$searched"); $footer"
+elif [ "$shown" -eq 0 ]; then
+  echo "# No results from $from; there are $(pages "$total" "matching "); $footer"
+else
+  echo "# Showing $from-$((from + shown - 1)) of $(pages "$total" "matching ") among $(pages "$searched"); $footer"
+fi
