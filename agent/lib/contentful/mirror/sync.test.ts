@@ -638,6 +638,20 @@ describe("Contentful mirror sync", () => {
     );
   });
 
+  it("drops users of spaces that are no longer configured when users cannot be listed", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    mockEntries({ "sample-site": [entry("post1")] }, {}, 403);
+    const kept =
+      '{"name":"Ada Lovelace","space":"sample-site","userId":"ada"}\n';
+    const { files, workspace } = memoryWorkspace({
+      "/contentful/users.ndjson": `${kept}{"name":"Grace Hopper","space":"removed-space","userId":"grace"}\nnot json\n`,
+    });
+
+    await syncContentfulMirror({ mode: "full", now, workspace });
+
+    expect(files.get("/contentful/users.ndjson")).toBe(kept);
+  });
+
   it("writes an empty users file before the database build when users cannot be listed", async () => {
     vi.spyOn(console, "warn").mockImplementation(() => {});
     mockEntries({ "sample-site": [entry("post1")] }, {}, 403);

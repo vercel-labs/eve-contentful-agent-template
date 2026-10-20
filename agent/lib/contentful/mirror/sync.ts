@@ -5,6 +5,8 @@
  * @packageDocumentation
  */
 
+import { z } from "zod";
+
 import { callApi } from "../api";
 import { configuredSpaces, configurationKey } from "../config";
 import { entryStatus } from "../content";
@@ -197,13 +199,33 @@ const readUsers = async (signal?: AbortSignal) => {
   return { count, text };
 };
 
+/* The part of a users file line needed to tell which space it belongs to. */
+const userLineSpace = z.object({ space: z.string() });
+
+/* Keeps the previous users file's lines for spaces that are still configured. */
+const configuredUserLines = (previous: string) => {
+  const spaces = new Set(Object.values(configuredSpaces()));
+  return previous
+    .split("\n")
+    .filter((line) => {
+      try {
+        const parsed = userLineSpace.safeParse(JSON.parse(line));
+        return parsed.success && spaces.has(parsed.data.space);
+      } catch {
+        return false;
+      }
+    })
+    .map((line) => `${line}\n`)
+    .join("");
+};
+
 /**
  * Writes the users file, keeping the previous one when the CMA cannot list users.
  *
  * @param workspace - Mirror storage receiving the users file.
  * @param signal - Cancellation signal; an abort still fails the sync.
  * @returns Number of users written, or null when listing failed.
- * @remarks A failed listing, such as a token without permission to read space users, is logged and does not fail the sync. Without a previous file, an empty one is written so the database build still finds it.
+ * @remarks A failed listing, such as a token without permission to read space users, is logged and does not fail the sync. The previous file is kept without the users of spaces that are no longer configured, or replaced by an empty file when there is none, so the database build still finds it.
  */
 const syncUsers = async (
   workspace: MirrorWorkspace,
@@ -219,9 +241,13 @@ const syncUsers = async (
     console.warn("contentful.mirror_users_failed", {
       message: error instanceof Error ? error.message : String(error),
     });
-    if ((await workspace.readText(MIRROR_USERS_PATH)) === null) {
-      await workspace.writeFiles([{ content: "", path: MIRROR_USERS_PATH }]);
-    }
+    const previous = await workspace.readText(MIRROR_USERS_PATH);
+    await workspace.writeFiles([
+      {
+        content: previous === null ? "" : configuredUserLines(previous),
+        path: MIRROR_USERS_PATH,
+      },
+    ]);
     return null;
   }
   await workspace.writeFiles([
