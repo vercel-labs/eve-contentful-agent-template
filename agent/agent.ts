@@ -5,5 +5,5 @@ export default defineAgent({
     maxInputTokensPerSession: 5_000_000,
     maxOutputTokensPerSession: 100_000,
   },
-  model: "openai/gpt-6.1-sol-fast",
+  model: "anthropic/claude-opus-5.5-fast",
 });

@@ -95,7 +95,7 @@ Use a skill for a procedure the agent only needs for certain tasks. The existing
 
 ### Model and token limits
 
-Change `model` in [agent/agent.ts](agent/agent.ts) to use another [AI Gateway model](https://vercel.com/ai-gateway/models). The template uses `openai/gpt-6.1-sol-fast` and authenticates with Vercel OIDC. For other hosting environments, see [AI Gateway authentication](https://vercel.com/docs/ai-gateway/authentication-and-byok).
+Change `model` in [agent/agent.ts](agent/agent.ts) to use another [AI Gateway model](https://vercel.com/ai-gateway/models). The template uses `anthropic/claude-opus-5.5-fast` and authenticates with Vercel OIDC. For other hosting environments, see [AI Gateway authentication](https://vercel.com/docs/ai-gateway/authentication-and-byok).
 
 The same file limits each session to `5_000_000` input tokens and `100_000` output tokens through `maxInputTokensPerSession` and `maxOutputTokensPerSession`. Increase the input limit if sessions stop after reading large amounts of content, or the output limit if they stop after generating long responses. See [eve's agent configuration](https://eve.dev/docs/agent-config) for the supported settings.
 
