@@ -7,6 +7,7 @@ import {
   MIRROR_PATH,
   MIRROR_REGION,
 } from "./lib/contentful/mirror/files";
+import { prefetchMirror } from "./lib/contentful/mirror/prefetch";
 
 /**
  * Sandbox environment for the agent: Vercel Sandbox when deployed, just-bash locally.
@@ -29,10 +30,12 @@ export default defineSandbox(async () => {
     return environment.open();
   }
   try {
-    return await environment.open({
+    const sandbox = await environment.open({
       mounts: { [MIRROR_PATH]: { drive: MIRROR_DRIVE_NAME, mode: "snapshot" } },
       networkPolicy: "deny-all",
     });
+    await prefetchMirror(sandbox);
+    return sandbox;
   } catch (error) {
     console.warn("contentful.mirror_unavailable", {
       message: error instanceof Error ? error.message : String(error),

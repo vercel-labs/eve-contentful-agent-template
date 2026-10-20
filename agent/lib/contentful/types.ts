@@ -210,6 +210,8 @@ export interface ContentTypeField extends JsonObject {
  * Content type identity and field definitions used for schema discovery and write validation.
  */
 export interface RawContentType extends JsonObject {
+  /** Editor-facing explanation of what the content type is for. */
+  description?: string;
   displayField?: string;
   fields: (ContentTypeField & {
     id: string;

@@ -128,6 +128,33 @@ const richTextReferences = (fieldDefinition: ContentTypeField) => {
 };
 
 /**
+ * Describes one content-type field for the model: type, constraints, and allowed link targets.
+ *
+ * @param field - Field definition from a CMA content type.
+ * @returns Field identity, data type, required/localized flags, and reference restrictions.
+ * @remarks Shared by the live schema tool and the schema stored with the searchable copy.
+ */
+export const describeContentTypeField = (
+  field: RawContentType["fields"][number]
+) => ({
+  allowedContentTypeIds: referenceTargets(field),
+  id: field.id,
+  items: field.items
+    ? {
+        allowedContentTypeIds: referenceTargets(field.items),
+        linkType: field.items.linkType ?? null,
+        type: field.items.type,
+      }
+    : null,
+  linkType: field.linkType ?? null,
+  localized: field.localized ?? false,
+  name: field.name,
+  required: field.required ?? false,
+  richTextReferences: richTextReferences(field),
+  type: field.type,
+});
+
+/**
  * List content types or inspect one model without persistent schema caching.
  *
  * @param input - Schema input; null contentTypeId lists a catalog page, with null limit/skip meaning 25/0.
@@ -157,23 +184,7 @@ export const getContentfulSchema = async (
     return {
       contentType: {
         displayField: model.displayField ?? null,
-        fields: model.fields.map((field) => ({
-          allowedContentTypeIds: referenceTargets(field),
-          id: field.id,
-          items: field.items
-            ? {
-                allowedContentTypeIds: referenceTargets(field.items),
-                linkType: field.items.linkType ?? null,
-                type: field.items.type,
-              }
-            : null,
-          linkType: field.linkType ?? null,
-          localized: field.localized ?? false,
-          name: field.name,
-          required: field.required ?? false,
-          richTextReferences: richTextReferences(field),
-          type: field.type,
-        })),
+        fields: model.fields.map(describeContentTypeField),
         id: model.sys.id,
         name: model.name,
       },
