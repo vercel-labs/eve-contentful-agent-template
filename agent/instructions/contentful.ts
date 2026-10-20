@@ -40,7 +40,7 @@ export default defineDynamic({
   events: {
     "turn.started": () =>
       defineInstructions({
-        content: `Configured Contentful spaces (alias: ID): ${JSON.stringify(configuredSpaces())}. Environment: ${environmentId()}. Locale: ${process.env.CONTENTFUL_LOCALE || "each environment's default locale"}. Discover content types and fields with get_contentful_schema.\n\n${websiteInstructions()}`,
+        content: `Configured Contentful spaces (alias: ID): ${JSON.stringify(configuredSpaces())}. Environment: ${environmentId()}. Locale: ${process.env.CONTENTFUL_LOCALE || "each environment's default locale"}. Answer questions about content types and fields from the search_content skill's schema tables. Before creating or editing an entry, read its content type with get_contentful_schema.\n\n${websiteInstructions()}`,
         role: "user",
       }),
   },

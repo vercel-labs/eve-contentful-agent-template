@@ -11,7 +11,7 @@ import { withLocale } from "../lib/contentful/tool-locale";
  */
 export default defineTool({
   description:
-    "Discover configured Contentful content types or inspect their fields and allowed references. Use only for unfamiliar models/fields or schema-related API errors; reuse known schemas and avoid unrelated discovery. " +
+    "Discover configured Contentful content types or inspect their fields and allowed references. Use only before creating or editing an entry, after a schema-related API error, or when the search_content script reports that its content isn't available; otherwise answer questions about content models from the search_content skill's schema tables. Reuse known schemas and avoid unrelated discovery. " +
     "Null contentTypeId lists a paginated catalog; an ID returns its full field schema and ignores limit/skip. linkType distinguishes Entry/Asset links; null allowedContentTypeIds means no explicit type restriction. RichText fields include richTextReferences describing allowed same-space embed/hyperlink nodes and target types; other fields return null. " +
     "Schema permissions do not establish actual usage or absence in older entries. Cross-space resource references are not described.",
   /**

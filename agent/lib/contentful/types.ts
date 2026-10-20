@@ -37,9 +37,9 @@ export interface LinkedItem extends JsonObject {
   url?: string;
 }
 
-/* A one-line view of an entry, as returned by listing and search. */
+/* A one-line view of an entry, as stored in the searchable copy. */
 /**
- * One-line entry discovery result with publication state and available editor or website links.
+ * One-line entry summary with publication state and available editor or website links.
  */
 export interface EntrySummary extends JsonObject {
   /** Link to the entry in the Contentful web app. */
@@ -55,15 +55,6 @@ export interface EntrySummary extends JsonObject {
   updatedAt: string | null;
   /** Public configured website URL, when the entry has a slug. */
   url: string | null;
-}
-
-/* One search result. */
-/**
- * Entry summary annotated with the source of the text match.
- */
-export interface SearchHit extends EntrySummary {
-  /** `title` when the query matched the title, else `text` for a full-text match. */
-  matchedOn: "title" | "text";
 }
 
 /* A Contentful entry flattened into a structure the model can read directly. */

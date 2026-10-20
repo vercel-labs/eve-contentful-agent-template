@@ -2,7 +2,6 @@ import { describe, expect, it, vi } from "vitest";
 
 import { richTextBlockHash } from "./content";
 import { prepareCreation } from "./create";
-import { listEntries } from "./discovery";
 import { getEntry, readEntryContent } from "./entries";
 import { contentLocale, fieldLocale, withContentfulLocale } from "./locale";
 import { runContentfulQuery } from "./query";
@@ -227,11 +226,6 @@ describe("Contentful field locale selection", () => {
     expect(result.entries[0].referenceCoverage?.scannedFields).not.toContain(
       "/missing"
     );
-    const entries = await listEntries({ space: "docs" });
-    expect(entries[0]).toMatchObject({
-      slug: "shared-slug",
-      title: "French title",
-    });
   });
 
   it("isolates default locales when concurrent spaces share an override", async () => {
