@@ -2,7 +2,7 @@
 
 [![Agent Stack](https://img.shields.io/badge/Agent%20Stack-000?style=flat-square&logo=vercel&logoColor=FFF&labelColor=000&color=000)](https://vercel.com/kb/agent-stack) [![MIT License](https://img.shields.io/badge/License-MIT-000?style=flat-square&logo=opensourceinitiative&logoColor=white&labelColor=000&color=000)](LICENSE)
 
-Slack-based Contentful assistant built on [eve](https://eve.dev/), with Vercel Drives providing a searchable copy of your content. Draft and edit entries directly in Slack, then review publication requests before the content goes live. The agent also handles asset uploads and can present results as tables or charts.
+Slack-based Contentful assistant built on [eve](https://eve.dev/), with Vercel Drives providing a searchable copy of your content that the agent can also query with SQL. Draft and edit entries directly in Slack, then review publication requests before the content goes live. The agent also handles asset uploads and can present results as tables or charts.
 
 [![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https%3A%2F%2Fgithub.com%2Fvercel-labs%2Feve-contentful-agent-template&project-name=eve-contentful-agent&repository-name=eve-contentful-agent&env=CONTENTFUL_MANAGEMENT_TOKEN%2CCONTENTFUL_SPACE_IDS&envDescription=Contentful%20Management%20API%20token%20and%20space%20IDs%20to%20connect.&envLink=https%3A%2F%2Fgithub.com%2Fvercel-labs%2Feve-contentful-agent-template%23getting-started&connect=%5B%7B%22type%22%3A%22slack%22%2C%22env%22%3A%22SLACK_CONNECTOR%22%2C%22triggers%22%3Atrue%2C%22triggerPath%22%3A%22%2Feve%2Fv1%2Fslack%22%7D%5D&stores=%5B%7B%22type%22%3A%22blob%22%2C%22access%22%3A%22private%22%7D%5D)
 
@@ -25,6 +25,7 @@ Once you've deployed the agent, add it to a Slack channel and @mention it to sta
 | Content management           | Contentful     |
 | Slack integration            | Vercel Connect |
 | Content search and sync      | Vercel Sandbox |
+| SQL over synced content      | DuckDB         |
 | Per-user writing preferences | Vercel Blob    |
 
 ## Publishing
@@ -52,7 +53,7 @@ Choose your deployed project when `vercel link` prompts you. `vercel env pull .e
 
 `pnpm dev` opens eve's interactive chat in your terminal. Type a message such as "List the content types in my space" to talk to the agent, which reads and edits content in your configured Contentful space.
 
-Local sessions use `just-bash` without access to the content stored on Vercel Drives, so searches query Contentful directly. Test searches using Drives and publication approval cards through the agent in Slack.
+Local sessions use `just-bash` without access to the content stored on Vercel Drives, so searches and SQL questions query Contentful directly. Test searches, SQL queries, and publication approval cards through the agent in Slack. See [content search on Vercel Drives](CUSTOMIZATION.md#configure-content-search-on-vercel-drives) for how the synced copy and its SQL database are built.
 
 Before deploying, check your changes and confirm the agent builds:
 

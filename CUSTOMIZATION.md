@@ -91,7 +91,7 @@ Write for developers evaluating our product. Use American English and sentence-c
 
 Keep the existing editing and publication guidance alongside your writing rules. It tells the agent to read entries before changing them and follow the approval process.
 
-Use a skill for a procedure the agent only needs for certain tasks. The existing [content search skill](agent/skills/search_contentful/SKILL.md) and [structured query skill](agent/skills/contentful-query.ts) are examples. Put a task-specific writing checklist in a new skill instead of adding every editorial rule to the main instructions.
+Use a skill for a procedure the agent only needs for certain tasks. The existing [SQL query skill](agent/skills/search_content/SKILL.md) and [structured query skill](agent/skills/contentful_api.ts) are examples. Put a task-specific writing checklist in a new skill instead of adding every editorial rule to the main instructions.
 
 ### Model and token limits
 
@@ -224,7 +224,7 @@ Excluded users can still interact with the agent; this setting only skips their 
 
 ## Configure content search on Vercel Drives
 
-The agent searches a copy of your Contentful content stored as Markdown files on Vercel Drives. Scheduled syncs keep this copy up to date. Before editing or publishing, the agent reads the entries directly from Contentful to check their latest values.
+The agent keeps a copy of your Contentful content on Vercel Drives and runs SQL over it, both to find the pages that cover a topic and to answer questions that cover many entries at once, such as counts or audits. Scheduled syncs keep this copy up to date. Before editing or publishing, the agent reads the entries directly from Contentful to check their latest values.
 
 ### Drive and region
 
@@ -284,12 +284,26 @@ The command starts the sync in the background. In the terminal running `pnpm dev
 | `contentful.mirror_sync` | Content was copied to the Drive and the sync record was saved |
 | `contentful.mirror_sync_failed` | The run encountered an error; the log includes its message |
 | `contentful.mirror_sync_skipped` | Another sandbox held the Drive's write access, so this run made no changes |
+| `contentful.mirror_database_built` | The SQL database was rebuilt from the copied content; the log includes how long it took |
+| `contentful.mirror_database_failed` | The SQL database could not be built; the log includes the error, and the copied content was still saved |
 
 To read saved logs from an interactive local session, run `pnpm exec eve logs` in another terminal. These logs include informational messages even when the chat UI hides them.
 
-Local chat uses `just-bash` and cannot search the Drive, even after a successful sync. To test the refreshed content, start a new conversation with the agent in Slack.
+Local chat uses `just-bash` and cannot search or query the Drive, even after a successful sync. To test the refreshed content, start a new conversation with the agent in Slack.
 
-The copied entries are stored at `/contentful/<space-id>/<entry-id>.md`. The file `/contentful/manifest.json` records when the last sync succeeded. To change the indexed text, edit [mirror/files.ts](agent/lib/contentful/mirror/files.ts) and update its rendering tests.
+The copied entries are stored at `/contentful/<space-id>/<entry-id>.md`, each with a JSON record at the same path ending in `.json`. Content type definitions are stored in `/contentful/content-types.ndjson` and each space's members in `/contentful/users.ndjson`, outside the space folders so that searches never treat them as entries. The users file holds only each member's ID and name, which let SQL answer questions about who created or updated content. Listing members requires a Contentful token that can read the space's users; when it can't, the sync logs `contentful.mirror_users_failed` and keeps the previous file, or writes an empty one, so editor names stay unavailable until the token can read them. The file `/contentful/manifest.json` records when the last sync succeeded and names the SQL database when that sync built one. To change the indexed text or the fields available to SQL, edit [mirror/files.ts](agent/lib/contentful/mirror/files.ts) and update its rendering tests.
+
+### Query the copy with SQL
+
+Each sync writes a JSON record beside every entry's Markdown file. The record holds the entry's metadata, the IDs of the users who last created, updated, and published it, its plain field values such as strings and lists, and every entry and asset it links to, including those embedded in rich text. Each sync also saves the definition of every content type in your configured spaces to `/contentful/content-types.ndjson`, including each field's data type, whether it is required, and which content types its links may point to. After writing the files, the sync combines them into one DuckDB database at `/contentful/mirror.duckdb`, which the `search_content` skill reads with SQL. Because one query covers every configured space without pagination, the agent can answer counts and audits across all of your content in a single step instead of paging through the Contentful API, and the stored definitions let it check which fields a content type has or requires without a separate lookup. For edits made since the last sync, it still queries Contentful directly, and it always reads the live content type before creating or changing an entry.
+
+The sync's sandbox has no network access, so the application downloads a pinned DuckDB release from GitHub, checks its SHA-256 checksum, and stores the binary on the Drive at `/contentful/.bin/duckdb`, where agent sessions run the same copy. Later syncs reuse the stored binary. To change the DuckDB version, update `DUCKDB_VERSION` and the checksums for both architectures in [mirror/database.ts](agent/lib/contentful/mirror/database.ts).
+
+When the database can't be built, for example because the sandbox image lacks a library DuckDB needs, the sync still saves the updated files and omits the database from the manifest. The agent then runs the same SQL directly against the files and gets identical answers, though each query reads every file and can take a few seconds once the Drive holds tens of thousands of entries. The `contentful.mirror_database_failed` log message explains what went wrong.
+
+To keep the first query in a conversation fast, the agent reads the database in the background when the conversation's sandbox starts. eve doesn't repeat that setup when it resumes a sandbox that had stopped, so in conversations that have already used SQL, the agent repeats the background read at the start of each turn. Conversations that never use SQL skip it. If the background read can't start, the agent logs `contentful.mirror_prefetch_failed` and queries normally.
+
+The skill defines the tables `entries`, `refs`, `pages`, `content_types`, and `type_fields` and the full-text `search()` function with its `search_text` helper, which [mirror/database.ts](agent/lib/contentful/mirror/database.ts) builds. The skill keeps its own copy of these definitions in `agent/skills/search_content/scripts/views.sql` for when no database is available, and a test fails if the two copies differ, so update both together.
 
 ## Customize saved user preferences
 
