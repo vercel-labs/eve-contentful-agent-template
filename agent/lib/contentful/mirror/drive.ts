@@ -7,6 +7,8 @@
 
 import { Drive, Sandbox } from "@vercel/sandbox";
 
+import { buildMirrorDatabase } from "./database";
+import type { DatabaseSandbox } from "./database";
 import { MIRROR_DRIVE_NAME, MIRROR_PATH, MIRROR_REGION } from "./files";
 import { syncContentfulMirror } from "./sync";
 import type { MirrorSyncMode, MirrorWorkspace } from "./sync";
@@ -18,17 +20,8 @@ const REMOVE_BATCH = 200;
 const SYNC_SANDBOX_TIMEOUT_MS = 15 * 60 * 1000;
 
 /* The sandbox operations the mirror workspace uses. */
-interface MirrorSandbox {
+interface MirrorSandbox extends DatabaseSandbox {
   readFileToBuffer: (file: { path: string }) => Promise<Buffer | null>;
-  runCommand: (
-    command: string,
-    args: string[]
-  ) => Promise<{
-    exitCode: number;
-    stderr: () => Promise<string>;
-    stdout: () => Promise<string>;
-  }>;
-  writeFiles: (files: { content: string; path: string }[]) => Promise<void>;
 }
 
 const run = async (sandbox: MirrorSandbox, command: string, args: string[]) => {
@@ -51,6 +44,7 @@ const run = async (sandbox: MirrorSandbox, command: string, args: string[]) => {
 export const sandboxMirrorWorkspace = (
   sandbox: MirrorSandbox
 ): MirrorWorkspace => ({
+  buildDatabase: () => buildMirrorDatabase(sandbox),
   async listEntryFiles() {
     const stdout = await run(sandbox, "find", [
       MIRROR_PATH,

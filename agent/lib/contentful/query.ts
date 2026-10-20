@@ -231,7 +231,12 @@ const queryEntryActors = (sys: RawSys) => ({
   updatedByUserId: sys.updatedBy?.sys.id ?? null,
 });
 
-interface RawSpaceUser {
+/**
+ * Space user profile fields read from the CMA `/spaces/{spaceId}/users` endpoints.
+ *
+ * @remarks Only names and the ID are declared; callers must never copy emails or other profile fields.
+ */
+export interface RawSpaceUser {
   firstName?: string;
   lastName?: string;
   sys: { id: string };
