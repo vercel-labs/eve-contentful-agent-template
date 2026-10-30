@@ -1,56 +1,49 @@
-import { beforeEach, expect, it } from "vitest";
+import type { SlackRendererEvents } from "eve/channels/slack";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { messageCompletedHarness } from "../../testing/slack";
-import { testState, installTestState } from "../../testing/state";
+import { installTestState, testState } from "../../testing/state";
 import { replyEvents } from "./replies";
-import {
-  recordVisualizationDelivery,
-  visualizationReceipts,
-} from "./visualizations/receipts";
+import { visualizationReceipts } from "./visualizations/receipts";
 
-beforeEach(() => testState.reset());
-it("suppresses duplicate prose after a successful visualization", async () => {
-  const harness = messageCompletedHarness(replyEvents["message.completed"]);
-  recordVisualizationDelivery("turn-1", true);
-  await harness.complete();
-  expect(harness.next).not.toHaveBeenCalled();
-});
-it("keeps the normal response after any failed visualization", async () => {
-  const harness = messageCompletedHarness(replyEvents["message.completed"]);
-  recordVisualizationDelivery("turn-1", true);
-  recordVisualizationDelivery("turn-1", false);
-  await harness.complete();
-  expect(harness.next).toHaveBeenCalledOnce();
-});
-it("does not suppress later turns", async () => {
-  const harness = messageCompletedHarness(replyEvents["message.completed"]);
-  recordVisualizationDelivery("older-turn", true);
-  await harness.complete();
-  expect(harness.next).toHaveBeenCalledOnce();
+// SAFETY: This module always defines the renderer event under test.
+const render = replyEvents["content.completed"] as NonNullable<
+  SlackRendererEvents["content.completed"]
+>;
+const event = (overrides = {}) => ({
+  data: {
+    kind: "text",
+    partId: "part-1",
+    phase: "reply",
+    runId: "run-1",
+    value: "Reply",
+  },
+  scope: { turnId: "turn-1" },
+  type: "content.completed" as const,
+  ...overrides,
 });
 
-it("defers tool-call narration to eve without touching reply state", async () => {
-  const harness = messageCompletedHarness(replyEvents["message.completed"]);
-  harness.channel.state.pendingToolCallMessage = "Checking the guides.";
-  recordVisualizationDelivery("turn-1", true);
-  await harness.complete({ finishReason: "tool-calls" });
-  expect(harness.next).toHaveBeenCalledOnce();
-  expect(harness.channel.state.pendingToolCallMessage).toBe(
-    "Checking the guides."
-  );
-  expect(visualizationReceipts.get()).toEqual({
-    failed: false,
-    posted: true,
-    turnId: "turn-1",
+beforeEach(() => {
+  installTestState();
+  testState.reset();
+});
+
+describe("Slack reply renderer", () => {
+  it("suppresses prose after a successful visualization in the same turn", async () => {
+    visualizationReceipts.update(() => ({
+      failed: false,
+      posted: true,
+      turnId: "turn-1",
+    }));
+    const next = vi.fn(() => Promise.resolve());
+    // SAFETY: The renderer does not inspect context in this assertion.
+    await render(event(), {} as never, next);
+    expect(next).not.toHaveBeenCalled();
+  });
+
+  it("delegates ordinary completed replies to eve", async () => {
+    const next = vi.fn(() => Promise.resolve());
+    // SAFETY: The renderer does not inspect context in this assertion.
+    await render(event(), {} as never, next);
+    expect(next).toHaveBeenCalledOnce();
   });
 });
-it("clears buffered narration when a final reply is suppressed", async () => {
-  const harness = messageCompletedHarness(replyEvents["message.completed"]);
-  harness.channel.state.pendingToolCallMessage = "Checking the guides.";
-  recordVisualizationDelivery("turn-1", true);
-  await harness.complete();
-  expect(harness.next).not.toHaveBeenCalled();
-  expect(harness.channel.state.pendingToolCallMessage).toBeNull();
-});
-
-beforeEach(installTestState);

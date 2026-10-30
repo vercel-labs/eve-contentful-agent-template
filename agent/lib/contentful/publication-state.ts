@@ -104,9 +104,9 @@ export const getContentfulPublicationForApproval = (
  *
  * @param callId - Tool call ID owning the saved plan in the active eve session.
  * @param input - Original publication input, checked against the saved fingerprint.
- * @param messageId - Nonempty ID returned by successful preview delivery.
+ * @param messageId - Nonempty delivery identifier. Native eve interaction cards use their stable framework marker.
  * @throws {@link Error} If the ID/input is invalid, the plan or message ID is missing, or eve state is unavailable.
- * @remarks Calling this with an unconfirmed delivery would bypass the execution delivery gate.
+ * @remarks Calling this with an unconfirmed delivery would bypass the execution delivery gate. Native cards reach this point only after eve admits their signed response.
  */
 export const recordContentfulPublicationPreview = (
   callId: string,

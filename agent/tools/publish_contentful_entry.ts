@@ -9,6 +9,7 @@ import type { ContentfulPublicationOutcome } from "../lib/contentful/publication
 import {
   getOrPrepareContentfulPublication,
   publishPlannedContentfulEntries,
+  recordContentfulPublicationPreview,
 } from "../lib/contentful/publication-state";
 import { withLocale } from "../lib/contentful/tool-locale";
 
@@ -45,13 +46,24 @@ export default defineTool({
         };
       }
     },
-    response: ({ response }) =>
-      response.principal.principalType === "user"
-        ? { status: "allowed" }
-        : {
-            reason: "An authenticated user must approve or cancel publication.",
-            status: "rejected",
-          },
+    response: ({ request, response }) => {
+      if (response.principal.principalType !== "user") {
+        return {
+          reason: "An authenticated user must approve or cancel publication.",
+          status: "rejected" as const,
+        };
+      }
+      if (response.decision === "approve" && request.toolInput) {
+        // An accepted native Slack interaction proves eve delivered its signed
+        // framework-owned card before this policy runs.
+        recordContentfulPublicationPreview(
+          request.callId,
+          request.toolInput,
+          "eve-native-interaction"
+        );
+      }
+      return { status: "allowed" as const };
+    },
   },
   description:
     "Publish 1–20 existing Contentful entries in a configured space, including pages and supporting components, at their requested versions. Read each entry first and provide its entry ID and expected version. " +

@@ -6,7 +6,7 @@ import { slackApi } from "../integrations/slack/api";
 import { replyEvents } from "../integrations/slack/replies";
 import { visualizationReceipts } from "../integrations/slack/visualizations/receipts";
 import { slackAuth, toolContext } from "../testing/session";
-import { messageCompletedHarness } from "../testing/slack";
+import { contentCompletedHarness } from "../testing/slack";
 import { testState, installTestState } from "../testing/state";
 import { isCallable } from "../values";
 import tool from "./post-slack-table";
@@ -271,7 +271,7 @@ describe("bounded table fallback", () => {
       failed: false,
       posted: true,
     });
-    const harness = messageCompletedHarness(replyEvents["message.completed"]);
+    const harness = contentCompletedHarness(replyEvents["content.completed"]);
     await harness.complete();
     expect(harness.next).not.toHaveBeenCalled();
   });

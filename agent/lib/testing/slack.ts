@@ -18,8 +18,6 @@ import type {
 } from "eve/channels/slack";
 import { vi } from "vitest";
 
-import { sessionContext } from "./session";
-
 const unsupported = (name: string) => (): never => {
   throw new Error(`This test does not provide ${name}.`);
 };
@@ -104,6 +102,7 @@ export const slackThread = (
 /* The `ctx.slack` handle; `request` defaults to an `{ ok: true }` spy. */
 const slackHandle = (overrides: Partial<SlackHandle> = {}): SlackHandle => ({
   channelId: "C123",
+  codeChannel: false,
   request: vi.fn<SlackHandle["request"]>(async () => await { ok: true }),
   teamId: "T123",
   threadTs: "100.1",
@@ -133,10 +132,11 @@ export const inboundContext = ({
   cancel: unsupported("session cancellation"),
   clear: unsupported("session clearing"),
   compact: unsupported("session compaction"),
+  end: unsupported("session ending"),
   isBotMentioned: vi.fn(() => mentioned),
   isDMOrPrivateChannel: vi.fn(() => Promise.resolve(false)),
   isSubscribed: vi.fn(async () => await subscribed),
-  reset: unsupported("session reset"),
+  openCodeChannel: unsupported("code channel opening"),
   resolveSession: unsupported("session resolution"),
   respond: unsupported("input responses"),
   send: unsupported("session sends"),
@@ -156,7 +156,7 @@ interface EventContextOptions {
  * @param options - Slack API, channel-state, and thread overrides for the renderer test.
  * @returns A channel fixture with stable workspace/thread coordinates and observable thread methods.
  */
-export const slackEventContext = ({
+const slackEventContext = ({
   slack,
   state,
   thread,
@@ -166,9 +166,9 @@ export const slackEventContext = ({
   thread: slackThread(thread),
 });
 
-type MessageCompleted = NonNullable<SlackRendererEvents["message.completed"]>;
+type ContentCompleted = NonNullable<SlackRendererEvents["content.completed"]>;
 
-type MessageCompletedEvent = Parameters<MessageCompleted>[0];
+type ContentCompletedEvent = Parameters<ContentCompleted>[0];
 
 /**
  * Exercises a message-completed renderer while observing final reply delegation.
@@ -177,7 +177,7 @@ type MessageCompletedEvent = Parameters<MessageCompleted>[0];
  * @returns The channel, completion driver, post spy, and next-renderer spy.
  * @remarks The harness observes whether the chain continues without duplicating eve's own rendering.
  */
-export const messageCompletedHarness = (handler: MessageCompleted) => {
+export const contentCompletedHarness = (handler: ContentCompleted) => {
   const post = vi.fn<SlackThread["post"]>(
     async () =>
       await {
@@ -186,21 +186,25 @@ export const messageCompletedHarness = (handler: MessageCompleted) => {
       }
   );
   const channel = slackEventContext({ thread: { post } });
-  const next = vi.fn<SlackRenderNext<"message.completed">>(() =>
+  const next = vi.fn<SlackRenderNext<"content.completed">>(() =>
     Promise.resolve()
   );
-  const complete = (overrides: Partial<MessageCompletedEvent> = {}) =>
+  const complete = (overrides: Partial<ContentCompletedEvent> = {}) =>
     handler(
       {
-        finishReason: "stop",
-        message: "Here is the result.",
-        sequence: 1,
-        stepIndex: 2,
-        turnId: "turn-1",
+        data: {
+          kind: "text",
+          partId: "part-1",
+          phase: "reply",
+          runId: "run-1",
+          value: "Here is the result.",
+        },
+        scope: { turnId: "turn-1" },
+        type: "content.completed",
         ...overrides,
       },
-      channel,
-      sessionContext(),
+      // SAFETY: Reply tests only observe whether the renderer delegates; they do not read event context.
+      channel as never,
       next
     );
   return { channel, complete, next, post };

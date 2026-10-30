@@ -12,17 +12,20 @@ import { visualizationReceipts } from "./visualizations/receipts";
  * failures propagate rather than triggering a potentially duplicate post.
  */
 export const replyEvents = {
-  async "message.completed"(event, channel, _ctx, renderNext) {
-    if (event.finishReason === "tool-calls") {
-      await renderNext();
-      return;
+  "content.completed"(event, _ctx, next) {
+    if (event.data.phase !== "reply" || event.data.kind !== "text") {
+      return next();
     }
-    channel.state.pendingToolCallMessage = null;
 
     const receipt = visualizationReceipts.get();
-    if (receipt?.turnId === event.turnId && receipt.posted && !receipt.failed) {
+    if (
+      receipt &&
+      receipt.turnId === event.scope?.turnId &&
+      receipt.posted &&
+      !receipt.failed
+    ) {
       return;
     }
-    await renderNext();
+    return next();
   },
 } satisfies SlackRendererEvents;

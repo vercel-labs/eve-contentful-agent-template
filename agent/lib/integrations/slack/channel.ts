@@ -13,7 +13,7 @@ import {
   createSlackIdentityResolver,
   formatSlackIdentityContext,
 } from "./identity";
-import { createInputRequestEvents } from "./input-requests";
+import { renderInputRequestCard } from "./input-requests";
 import type { SlackInputRequestsConfig } from "./input-requests";
 import { replyEvents } from "./replies";
 
@@ -264,7 +264,10 @@ export const createSlackChannel = (config: CreateSlackChannelConfig = {}) => {
     renderers: [
       ...(channelConfig.renderers ?? []),
       {
-        events: { ...replyEvents, ...createInputRequestEvents(inputRequests) },
+        events: replyEvents,
+        interactionCard(card, next) {
+          return renderInputRequestCard(card, next, inputRequests);
+        },
       },
     ],
     threadContext,

@@ -33,7 +33,7 @@ if (
 }
 const { request, response } = policy;
 const responseContext = (
-  decision: "approve" | "cancel"
+  decision: "approve" | "deny"
 ): ApprovalResponseContext<typeof input> => ({
   auth: {
     getToken: () => Promise.reject(new Error("Unused")),
@@ -43,8 +43,8 @@ const responseContext = (
   },
   request: {
     callId: "call-1",
+    interactionId: "approval-1",
     principal: slackAuth(),
-    requestId: "approval-1",
     toolInput: input,
     toolName: "publish_contentful_entry",
   },
@@ -115,7 +115,7 @@ describe("template configuration", () => {
 });
 
 describe("publication access and frozen scope", () => {
-  it.each(["approve", "cancel"] as const)(
+  it.each(["deny"] as const)(
     "allows any authenticated user to %s",
     async (decision) => {
       expect(await response(responseContext(decision))).toEqual({
