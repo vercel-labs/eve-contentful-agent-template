@@ -6,7 +6,9 @@ import { requireContentfulEditor } from "../lib/contentful/access";
 import { contentfulPublishInputSchema } from "../lib/contentful/input-schemas";
 import { withContentfulLocale } from "../lib/contentful/locale";
 import type { ContentfulPublicationOutcome } from "../lib/contentful/publication";
+import { postContentfulPublicationPreview } from "../lib/contentful/publication-preview";
 import {
+  getContentfulPublicationPreviewMessageId,
   getOrPrepareContentfulPublication,
   publishPlannedContentfulEntries,
   recordContentfulPublicationPreview,
@@ -35,6 +37,13 @@ export default defineTool({
             "A Slack thread is required to display the publication plan for approval."
           );
         }
+        if (!getContentfulPublicationPreviewMessageId(callId, toolInput)) {
+          const messageId = await postContentfulPublicationPreview(
+            { session },
+            plan
+          );
+          recordContentfulPublicationPreview(callId, toolInput, messageId);
+        }
         return "user-approval";
       } catch (error) {
         return {
@@ -46,21 +55,12 @@ export default defineTool({
         };
       }
     },
-    response: ({ request, response }) => {
+    response: ({ response }) => {
       if (response.principal.principalType !== "user") {
         return {
           reason: "An authenticated user must approve or cancel publication.",
           status: "rejected" as const,
         };
-      }
-      if (response.decision === "approve" && request.toolInput) {
-        // An accepted native Slack interaction proves eve delivered its signed
-        // framework-owned card before this policy runs.
-        recordContentfulPublicationPreview(
-          request.callId,
-          request.toolInput,
-          "eve-native-interaction"
-        );
       }
       return { status: "allowed" as const };
     },

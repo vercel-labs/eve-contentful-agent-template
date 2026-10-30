@@ -81,8 +81,7 @@ const referenceBlock = (items: PublicationItem[]) => {
  * @param plan - Saved publication plan; only its requested/dependency items are rendered.
  * @returns Slack container/context blocks and literal notification text with requested entry links.
  * @remarks Linked references show status; oversized tables become complete linked lists.
- * eve owns controls and records confirmed delivery when it admits an answer. Titles remain structured
- * link text, and notification text neutralizes Slack angle-bracket syntax.
+ * Titles remain structured link text, and notification text neutralizes Slack angle-bracket syntax.
  */
 export const formatContentfulPublicationPreview = (
   plan: ContentfulPublicationPlan

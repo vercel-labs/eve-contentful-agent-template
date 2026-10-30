@@ -81,32 +81,26 @@ export const getOrPrepareContentfulPublication = async (
 };
 
 /**
- * Read a matching saved approval plan without rebuilding scope.
+ * Read the confirmed Slack preview receipt for a frozen publication plan.
  *
  * @param callId - Tool call ID owning the plan in the active eve session.
  * @param input - Original publication input, checked against the saved fingerprint.
- * @returns A copy of the frozen plan for preview rendering.
- * @throws {@link Error} If the ID/input is invalid, no matching approval plan exists, or eve state is unavailable.
+ * @returns The confirmed Slack message timestamp, or null when no preview was delivered.
+ * @throws {@link Error} If the ID/input is invalid or eve state is unavailable.
  */
-export const getContentfulPublicationForApproval = (
+export const getContentfulPublicationPreviewMessageId = (
   callId: string,
   input: JsonValue
-): ContentfulPublicationPlan => {
-  const saved = existingPlan(callId, input);
-  if (!saved?.plan.requiresApproval) {
-    throw new Error("No saved publication approval plan exists for this call.");
-  }
-  return saved.plan;
-};
+): string | null => existingPlan(callId, input)?.previewMessageId ?? null;
 
 /**
  * Record confirmed preview delivery before approved publication may execute.
  *
  * @param callId - Tool call ID owning the saved plan in the active eve session.
  * @param input - Original publication input, checked against the saved fingerprint.
- * @param messageId - Nonempty delivery identifier. Native eve interaction cards use their stable framework marker.
+ * @param messageId - Nonempty Slack message timestamp returned by a successful preview post.
  * @throws {@link Error} If the ID/input is invalid, the plan or message ID is missing, or eve state is unavailable.
- * @remarks Calling this with an unconfirmed delivery would bypass the execution delivery gate. Native cards reach this point only after eve admits their signed response.
+ * @remarks Calling this with an unconfirmed delivery would bypass the execution delivery gate.
  */
 export const recordContentfulPublicationPreview = (
   callId: string,

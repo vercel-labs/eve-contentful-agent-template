@@ -97,7 +97,7 @@ Use a skill for a procedure the agent only needs for certain tasks. The existing
 
 Change `model` in [agent/agent.ts](agent/agent.ts) to use another [AI Gateway model](https://vercel.com/ai-gateway/models). The template uses `anthropic/claude-opus-5.5-fast` and authenticates with Vercel OIDC. For other hosting environments, see [AI Gateway authentication](https://vercel.com/docs/ai-gateway/authentication-and-byok).
 
-The same file limits each session to `5_000_000` input tokens, including cache reads, and `100_000` output tokens through `limits.sessionUsage`. Increase the input limit if sessions stop after reading large amounts of content, or the output limit if they stop after generating long responses. See [eve's agent configuration](https://eve.dev/docs/agent-config) for the supported settings.
+The same file pauses a session for confirmation after `5_000_000` input tokens, including cached tokens, or `100_000` output tokens since its last continuation through `limits.sessionUsage`. Each approved **Continue** starts a new usage window, so either threshold can be reached again. Increase the input limit if sessions pause after reading large amounts of content, or the output limit if they pause while generating long responses. See [eve's agent configuration](https://eve.dev/docs/agent-config) for the supported settings.
 
 The [current-time instructions](agent/instructions/current-time.ts) add a UTC timestamp at the start of each turn. If you add regional date conventions, explain the intended timezone in your instructions so editorial dates remain unambiguous.
 

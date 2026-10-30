@@ -1,7 +1,10 @@
+import type { connectSlackCredentials } from "@vercel/connect/eve";
+import type { callSlackApi } from "eve/channels/slack";
 import type { ApprovalResponseContext } from "eve/tools/approval";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import publishTool from "../../tools/publish_contentful_entry";
+import { slackApi } from "../integrations/slack/api";
 import {
   approvalContext,
   localAuth,
@@ -14,7 +17,10 @@ import { requireContentfulEditor } from "./access";
 import { configuredSpaces, environmentId } from "./config";
 import { contentLocale, withContentfulLocale } from "./locale";
 import { pageKindInSpace, spacePath } from "./model";
-import { recordContentfulPublicationPreview } from "./publication-state";
+import {
+  getOrPrepareContentfulPublication,
+  recordContentfulPublicationPreview,
+} from "./publication-state";
 import { createCmaFake, link } from "./testing/cma";
 
 const input = {
@@ -70,6 +76,19 @@ const seed = (type = "guide") =>
   });
 beforeEach(() => testState.reset());
 
+const { credentials, post } = vi.hoisted(() => ({
+  credentials: vi.fn<typeof connectSlackCredentials>(),
+  post: vi.fn<typeof callSlackApi>(),
+}));
+
+beforeEach(() => {
+  vi.stubEnv("SLACK_CONNECTOR", "slack/test");
+  credentials.mockReturnValue({ botToken: "test-token" });
+  post.mockResolvedValue({ ok: true, ts: "preview-ts" });
+  vi.spyOn(slackApi, "credentials").mockImplementation(credentials);
+  vi.spyOn(slackApi, "request").mockImplementation(post);
+});
+
 describe("template configuration", () => {
   it("accepts arbitrary space IDs and rejects unconfigured space/environment paths", () => {
     vi.stubEnv("CONTENTFUL_SPACE_IDS", "store,help");
@@ -115,7 +134,7 @@ describe("template configuration", () => {
 });
 
 describe("publication access and frozen scope", () => {
-  it.each(["deny"] as const)(
+  it.each(["approve", "deny"] as const)(
     "allows any authenticated user to %s",
     async (decision) => {
       expect(await response(responseContext(decision))).toEqual({
@@ -143,14 +162,30 @@ describe("publication access and frozen scope", () => {
       })
     ).toMatchObject({ status: "rejected" });
   });
-  it("requires a confirmed Slack preview before publication", async () => {
+  it("does not treat an accepted approval as a preview receipt", async () => {
     const cma = seed();
-    expect(await request(approvalContext(input))).toBe("user-approval");
+    await getOrPrepareContentfulPublication("call-1", input);
+    expect(await response(responseContext("approve"))).toEqual({
+      status: "allowed",
+    });
     await expect(publishTool.execute(input, toolContext())).rejects.toThrow(
       "not been shown"
     );
     expect(cma.writes()).toHaveLength(0);
-    recordContentfulPublicationPreview("call-1", input, "slack-message");
+  });
+  it("records a Slack receipt only after posting the full frozen plan", async () => {
+    const cma = seed();
+    expect(await request(approvalContext(input))).toBe("user-approval");
+    expect(post).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({
+        body: expect.objectContaining({
+          blocks: expect.any(Array),
+          channel: "C123",
+          thread_ts: "1700000000.000100",
+        }),
+        operation: "chat.postMessage",
+      })
+    );
     expect(
       await publishTool.execute(
         input,
@@ -158,6 +193,21 @@ describe("publication access and frozen scope", () => {
       )
     ).toMatchObject({ complete: true });
     expect(cma.writes()).toHaveLength(1);
+  });
+  it("keeps publication blocked when Slack rejects the full preview", async () => {
+    const cma = seed();
+    post.mockResolvedValueOnce({ error: "msg_too_long", ok: false });
+    await expect(request(approvalContext(input))).resolves.toMatchObject({
+      reason: expect.stringContaining("msg_too_long"),
+      type: "denied",
+    });
+    expect(await response(responseContext("approve"))).toEqual({
+      status: "allowed",
+    });
+    await expect(publishTool.execute(input, toolContext())).rejects.toThrow(
+      "not been shown"
+    );
+    expect(cma.writes()).toHaveLength(0);
   });
   it("allows explicit components without a prompt", async () => {
     seed("codeBlock");
