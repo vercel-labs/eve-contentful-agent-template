@@ -1,3 +1,4 @@
+import { turn } from "eve/events";
 import { defineDynamic, defineInstructions } from "eve/instructions";
 
 /**
@@ -9,11 +10,14 @@ import { defineDynamic, defineInstructions } from "eve/instructions";
  * prefix for caching. The timestamp represents turn start, not a live clock.
  */
 export const currentTimeInstructions = () =>
-  defineDynamic((ctx) =>
-    defineInstructions({
-      content: `Current date and time: ${ctx.now.toISOString()} (UTC).`,
+  defineDynamic((ctx) => {
+    const startedAt = ctx.turn
+      ? turn(ctx.view, ctx.turn.id)?.startedAt
+      : undefined;
+    return defineInstructions({
+      content: `Current date and time: ${startedAt ?? ctx.now.toISOString()} (UTC).`,
       role: "user",
-    })
-  );
+    });
+  });
 
 export default currentTimeInstructions();

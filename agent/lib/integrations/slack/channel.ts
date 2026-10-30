@@ -1,6 +1,8 @@
 import { connectSlackCredentials } from "@vercel/connect/eve";
 import { defaultSlackAuth, slackChannel } from "eve/channels/slack";
 import type {
+  SlackAnswerContext,
+  SlackAnswerResult,
   SlackChannelConfig,
   SlackInboundMessageContext,
   SlackInboundResult,
@@ -22,7 +24,7 @@ import { replyEvents } from "./replies";
  */
 export type CreateSlackChannelConfig = Omit<
   SlackChannelConfig,
-  "credentials"
+  "credentials" | "onAnswers"
 > & {
   /**
    * Continue un-mentioned messages in active, single-author threads.
@@ -42,6 +44,21 @@ type InboundHandlers = Pick<
 >;
 
 const BOT_ID = /^B[A-Z0-9]+$/u;
+
+/**
+ * Admits a signed native Slack control only when Slack authenticated a human.
+ *
+ * @param ctx - Verified context that eve derived from the Slack interaction.
+ * @returns The verified human principal, or null to leave the request pending.
+ * @remarks Registering this as `onAnswers` also makes eve reject typed thread
+ * answers. The handler deliberately ignores callback payload fields, because
+ * only eve's signed interaction routing establishes that a control was posted
+ * in the request's original Slack channel and thread.
+ */
+export const allowVerifiedHumanSlackAnswer = (
+  ctx: SlackAnswerContext
+): SlackAnswerResult =>
+  ctx.defaultAuth.principalType === "user" ? { auth: ctx.defaultAuth } : null;
 
 /**
  * Builds a per-bot service principal for a bot post that Slack delivers without a user, such as a Slack Workflow message.
@@ -260,6 +277,9 @@ export const createSlackChannel = (config: CreateSlackChannelConfig = {}) => {
     credentials: connectSlackCredentials(
       requireEnv("SLACK_CONNECTOR", "slack/your-agent")
     ),
+    // This enables eve's native-control-only answer mode. Do not replace it
+    // with a message handler: typed replies cannot prove card delivery.
+    onAnswers: allowVerifiedHumanSlackAnswer,
     // Caller renderers stay outermost so they can wrap the shared rendering.
     renderers: [
       ...(channelConfig.renderers ?? []),

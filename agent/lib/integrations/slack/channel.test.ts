@@ -1,4 +1,5 @@
 import type {
+  SlackAnswerContext,
   SlackChannelConfig,
   SlackHandle,
   SlackMessage,
@@ -10,6 +11,7 @@ import { describe, expect, it, vi } from "vitest";
 import { slackAuth } from "../../testing/session";
 import { inboundContext, slackAuthor, slackMessage } from "../../testing/slack";
 import {
+  allowVerifiedHumanSlackAnswer,
   createSlackInboundHandlers,
   handleExplicitInvocation,
   selectInboundHandlers,
@@ -51,6 +53,17 @@ const context = (
 
 const message = (overrides: Partial<SlackMessage> = {}): SlackMessage =>
   slackMessage({ threadTs: THREAD_TS, ts: MESSAGE_TS, ...overrides });
+
+const answerContext = (
+  principalType: "service" | "user"
+): SlackAnswerContext => {
+  const inbound = inboundContext();
+  return {
+    defaultAuth: { ...userAuth, principalType },
+    slack: inbound.slack,
+    thread: inbound.thread,
+  };
+};
 
 const configuredChannel = (
   options: Parameters<typeof createSlackInboundHandlers>[0] = {}
@@ -133,6 +146,17 @@ describe("handleExplicitInvocation", () => {
       expect(result).toBeNull();
     }
   );
+});
+
+describe("allowVerifiedHumanSlackAnswer", () => {
+  it("permits only a verified human native control, so typed approval cannot authorize publication", () => {
+    // Setting this onAnswers hook makes eve route pending answers exclusively
+    // through its signed Slack controls; text replies never reach this handler.
+    expect(allowVerifiedHumanSlackAnswer(answerContext("service"))).toBeNull();
+    expect(allowVerifiedHumanSlackAnswer(answerContext("user"))).toEqual({
+      auth: { ...userAuth, principalType: "user" },
+    });
+  });
 });
 
 describe("selectInboundHandlers", () => {
