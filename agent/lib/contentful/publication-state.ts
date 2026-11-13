@@ -21,7 +21,8 @@ interface SavedPublication {
   plan: ContentfulPublicationPlan;
   configuration: string;
   locale: string;
-  previewMessageId: string | null;
+  /** Interaction whose Slack approval card was posted with this plan, or null before delivery. */
+  previewInteractionId: string | null;
 }
 // eve checkpoints these per-session plans across approval pauses. Progress is
 // checkpointed at step boundaries, not transactionally with Contentful writes.
@@ -36,7 +37,7 @@ const save = (callId: string, plan: ContentfulPublicationPlan) => {
       configuration: configurationKey(),
       locale: contentLocale(),
       plan: structuredClone(plan),
-      previewMessageId: current[callId]?.previewMessageId ?? null,
+      previewInteractionId: current[callId]?.previewInteractionId ?? null,
     },
   }));
 };
@@ -104,24 +105,24 @@ export const getContentfulPublicationForApproval = (
  *
  * @param callId - Tool call ID owning the saved plan in the active eve session.
  * @param input - Original publication input, checked against the saved fingerprint.
- * @param messageId - Nonempty ID returned by successful preview delivery.
- * @throws {@link Error} If the ID/input is invalid, the plan or message ID is missing, or eve state is unavailable.
+ * @param interactionId - Nonempty ID of the approval whose card Slack accepted with this plan.
+ * @throws {@link Error} If the ID/input is invalid, the plan or interaction ID is missing, or eve state is unavailable.
  * @remarks Calling this with an unconfirmed delivery would bypass the execution delivery gate.
  */
 export const recordContentfulPublicationPreview = (
   callId: string,
   input: JsonValue,
-  messageId: string
+  interactionId: string
 ): void => {
   const saved = existingPlan(callId, input);
-  if (!(saved && messageId)) {
+  if (!(saved && interactionId)) {
     throw new Error(
-      "Cannot record publication preview delivery without a saved plan and message ID."
+      "Cannot record publication preview delivery without a saved plan and interaction ID."
     );
   }
   plans.update((current) => ({
     ...current,
-    [callId]: { ...saved, previewMessageId: messageId },
+    [callId]: { ...saved, previewInteractionId: interactionId },
   }));
 };
 
@@ -153,7 +154,7 @@ export const publishPlannedContentfulEntries = async (
       "Contentful locale changed. Prepare a new publication plan."
     );
   }
-  if (saved.plan.requiresApproval && !saved.previewMessageId) {
+  if (saved.plan.requiresApproval && !saved.previewInteractionId) {
     throw new Error("The publication plan has not been shown for approval.");
   }
   const output = await executeContentfulPublication(

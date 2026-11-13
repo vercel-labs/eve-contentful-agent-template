@@ -4,7 +4,7 @@ import { z } from "zod";
 import {
   postVisualization,
   visualizationOutputSchema,
-} from "../integrations/slack/visualizations/post";
+} from "../visualizations/post";
 
 /* Trimmed, nonempty Slack category, series, or pie label, limited to 20 characters. */
 const labelSchema = z.string().trim().min(1).max(20);

@@ -2,7 +2,6 @@ import type { connectSlackCredentials } from "@vercel/connect/eve";
 import type { callSlackApi } from "eve/channels/slack";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { slackApi } from "../api";
 import {
   visualizationDelivery,
   postVisualization,
@@ -211,7 +210,9 @@ describe("visualization posting", () => {
 });
 
 beforeEach(() => {
-  vi.spyOn(slackApi, "request").mockImplementation(post);
-  vi.spyOn(slackApi, "credentials").mockImplementation(credentials);
+  vi.spyOn(visualizationDelivery, "credentials").mockImplementation(
+    credentials
+  );
   vi.spyOn(visualizationDelivery, "record").mockImplementation(record);
+  vi.spyOn(visualizationDelivery, "request").mockImplementation(post);
 });

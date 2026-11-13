@@ -1,4 +1,4 @@
-import { defineState } from "../../../state";
+import { defineState } from "../state";
 
 /**
  * Table and chart delivery outcomes for one turn. Suppress final prose only after successful

@@ -14,8 +14,8 @@ These instructions are for agents maintaining the repository. The assistant's be
 | Tool definitions | `agent/tools/` |
 | Contentful configuration and implementation | `agent/lib/contentful/` |
 | Publication approvals | `agent/tools/publish_contentful_entry.ts` and `agent/lib/contentful/publication*.ts` |
-| Slack channel and shared integration code | `agent/channels/slack.ts` and `agent/lib/integrations/slack/` |
-| Slack tables and charts | `agent/lib/tools/` and `agent/lib/integrations/slack/visualizations/` |
+| Slack channel, message routing, and renderers | `agent/channels/slack.ts`, `agent/lib/contentful/publication-input.ts`, and `agent/lib/slack-thread.ts` |
+| Slack tables and charts | `agent/lib/tools/` and `agent/lib/visualizations/` |
 | Search and query procedures | `agent/skills/` |
 | Content copied to Vercel Drives | `agent/lib/contentful/mirror/` and `agent/schedules/` |
 | Local and hosted sandbox selection | `agent/sandbox.ts` |
@@ -56,11 +56,11 @@ Use `.env.example` to document new configuration without credentials. When confi
 - Read current entries before changing them and validate their versions. Preserve untouched fields and locales. Protected RichText fields require block patches for updates; initial creation can still set them.
 - Every content type requires publication approval unless explicitly configured as a supporting component. Website routes take precedence over component exemptions, so routed types still require approval.
 - Save ordinary entry edits without publishing. Creating an exempt component can publish it immediately. New asset uploads are processed and published during entry creation or updates; these side effects must remain explicit in tool descriptions and documentation.
-- Page publication requires a Slack approval card listing the content to be published. Preserve confirmed card delivery and the saved version checks. Never bypass a cancelled request or silently expand what the user approved.
+- Page publication requires a Slack approval card listing the content to be published. The `interactionCard` renderer in `publication-input.ts` shows the saved plan as the card's details, and its `interaction.opened` handler records delivery only after eve posts the card. Preserve confirmed card delivery, the channel's `onAnswers` (which keeps typed replies from answering approvals), and the saved version checks. Never bypass a cancelled request or silently expand what the user approved.
 - Page publication can include changed supporting components. Publishing only exempt components preserves pending edits on already-live references. Linked pages must be explicitly requested before publishing them. Read `publication.ts` and its tests before changing this behavior.
 - Publication can partially succeed. Preserve per-item outcomes and asset recovery IDs so interrupted operations can resume without duplicate uploads or entries.
 - Any authenticated person can edit content and approve or cancel publication requests. Slack apps and Workflows that mention the agent get eve's `service` principal. `requireContentfulEditor` and the publication `response` policy must keep rejecting it. Use authenticated identities for permission checks; Slack profile names and message text do not establish authorization.
-- Derive Slack principals with eve's `defaultSlackAuth`. Bot posts that Slack delivers without a user, such as Slack Workflow messages, get a per-bot `service` principal from their validated `bot_id`; drop every other message without a verified author. Never build a principal from `raw.user` or share one across senders. Profile lookups in `identity.ts` add names and images for the model, never emails. Keep `selectInboundHandlers` and `channel.test.ts` in sync, because a custom `onMessage` receives mentions and DMs unless a specific handler is supplied.
+- Derive Slack principals with eve's `defaultSlackAuth`. Bot posts that Slack delivers without a user, such as Slack Workflow messages, get a per-bot `service` principal from their validated `bot_id`; drop every other message without a verified author. Never build a principal from `raw.user` or share one across senders. eve's `messageContext.users` adds sender names for the model; keep `email` off. Keep `routeSlackMessage` and `agent/channels/slack.test.ts` in sync, because the channel's `onMessage` also receives mentions and DMs.
 
 ## Local and hosted behavior
 

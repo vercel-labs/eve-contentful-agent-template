@@ -32,16 +32,14 @@ const websiteInstructions = (): string => {
 };
 
 /**
- * Adds Contentful configuration and supported website URL patterns at each turn.
+ * Adds Contentful configuration and supported website URL patterns to conversation history.
  *
- * @remarks Configuration is resolved when the turn starts so the model can use current deployment values.
+ * @returns User-role instructions describing the current Contentful configuration.
+ * @remarks Configuration is read from the environment before model calls; the user-role instruction joins history only when its content changes.
  */
-export default defineDynamic({
-  events: {
-    "turn.started": () =>
-      defineInstructions({
-        content: `Configured Contentful spaces (alias: ID): ${JSON.stringify(configuredSpaces())}. Environment: ${environmentId()}. Locale: ${process.env.CONTENTFUL_LOCALE || "each environment's default locale"}. Answer questions about content types and fields from the search_content skill's schema tables. Before creating or editing an entry, read its content type with get_contentful_schema.\n\n${websiteInstructions()}`,
-        role: "user",
-      }),
-  },
-});
+export default defineDynamic(() =>
+  defineInstructions({
+    content: `Configured Contentful spaces (alias: ID): ${JSON.stringify(configuredSpaces())}. Environment: ${environmentId()}. Locale: ${process.env.CONTENTFUL_LOCALE || "each environment's default locale"}. Answer questions about content types and fields from the search_content skill's schema tables. Before creating or editing an entry, read its content type with get_contentful_schema.\n\n${websiteInstructions()}`,
+    role: "user",
+  })
+);

@@ -1,6 +1,6 @@
 import { defineTool } from "eve/tools";
 
-import { slackThreadFromSession } from "#lib/integrations/slack/session";
+import { slackThreadFromSession } from "#lib/slack-thread";
 
 import { requireContentfulEditor } from "../lib/contentful/access";
 import { contentfulPublishInputSchema } from "../lib/contentful/input-schemas";
