@@ -33,7 +33,7 @@ if (
 }
 const { request, response } = policy;
 const responseContext = (
-  decision: "approve" | "cancel"
+  decision: "approve" | "deny"
 ): ApprovalResponseContext<typeof input> => ({
   auth: {
     getToken: () => Promise.reject(new Error("Unused")),
@@ -43,8 +43,8 @@ const responseContext = (
   },
   request: {
     callId: "call-1",
+    interactionId: "approval-1",
     principal: slackAuth(),
-    requestId: "approval-1",
     toolInput: input,
     toolName: "publish_contentful_entry",
   },
@@ -115,7 +115,7 @@ describe("template configuration", () => {
 });
 
 describe("publication access and frozen scope", () => {
-  it.each(["approve", "cancel"] as const)(
+  it.each(["approve", "deny"] as const)(
     "allows any authenticated user to %s",
     async (decision) => {
       expect(await response(responseContext(decision))).toEqual({
@@ -150,7 +150,7 @@ describe("publication access and frozen scope", () => {
       "not been shown"
     );
     expect(cma.writes()).toHaveLength(0);
-    recordContentfulPublicationPreview("call-1", input, "slack-message");
+    recordContentfulPublicationPreview("call-1", input, "approval-1");
     expect(
       await publishTool.execute(
         input,
@@ -179,7 +179,7 @@ describe("publication access and frozen scope", () => {
   it("rejects configuration changes while approval is pending", async () => {
     const cma = seed();
     expect(await request(approvalContext(input))).toBe("user-approval");
-    recordContentfulPublicationPreview("call-1", input, "slack-message");
+    recordContentfulPublicationPreview("call-1", input, "approval-1");
     vi.stubEnv("CONTENTFUL_COMPONENT_TYPES", "{}");
     await expect(publishTool.execute(input, toolContext())).rejects.toThrow(
       "configuration changed"

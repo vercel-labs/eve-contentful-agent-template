@@ -2,13 +2,11 @@ import type { callSlackApi } from "eve/channels/slack";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 
-import { slackApi } from "../integrations/slack/api";
-import { replyEvents } from "../integrations/slack/replies";
-import { visualizationReceipts } from "../integrations/slack/visualizations/receipts";
 import { slackAuth, toolContext } from "../testing/session";
-import { messageCompletedHarness } from "../testing/slack";
 import { testState, installTestState } from "../testing/state";
 import { isCallable } from "../values";
+import { visualizationDelivery } from "../visualizations/post";
+import { visualizationReceipts } from "../visualizations/receipts";
 import tool from "./post-slack-table";
 
 const { postMock } = vi.hoisted(() => ({
@@ -210,11 +208,6 @@ describe("Slack table link cells", () => {
 
 beforeEach(installTestState);
 
-beforeEach(() => {
-  vi.spyOn(slackApi, "request").mockImplementation(postMock);
-  vi.spyOn(slackApi, "credentials").mockReturnValue({ botToken: "test-token" });
-});
-
 describe("bounded table fallback", () => {
   const large = {
     table: {
@@ -271,9 +264,6 @@ describe("bounded table fallback", () => {
       failed: false,
       posted: true,
     });
-    const harness = messageCompletedHarness(replyEvents["message.completed"]);
-    await harness.complete();
-    expect(harness.next).not.toHaveBeenCalled();
   });
 
   it("shortens oversized URL cells visibly and neutralizes embedded fences", async () => {
@@ -348,4 +338,11 @@ it("fits the exact text budget and omits a whole row one character beyond it", a
   expect(shortened.textRowsShown).toBe(199);
   expect(shortened.textShortened).toBe(true);
   expect(posted(2).text.length).toBeLessThanOrEqual(39_000);
+});
+
+beforeEach(() => {
+  vi.spyOn(visualizationDelivery, "request").mockImplementation(postMock);
+  vi.spyOn(visualizationDelivery, "credentials").mockReturnValue({
+    botToken: "test-token",
+  });
 });

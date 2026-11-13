@@ -1,8 +1,9 @@
 import type { SessionAuthContext } from "eve/context";
 
-import { isString } from "../../values";
+import { isString } from "./values";
+
 /**
- * The slice of eve's tool context that carries the Slack origin.
+ * The slice of eve's tool and approval context that carries the Slack origin.
  */
 export interface SlackSessionContext {
   session: {
@@ -18,7 +19,7 @@ export interface SlackSessionContext {
  *
  * @param ctx - Session exposing its initiating and current principals.
  * @returns The initiating principal's thread, then the current principal's thread, or null.
- * @remarks Preferring the initiator keeps approval and visualization replies in the original thread.
+ * @remarks `defaultSlackAuth` records `channel_id` and `thread_ts`. Preferring the initiator keeps approval and visualization replies in the original thread.
  */
 export const slackThreadFromSession = (
   ctx: SlackSessionContext
@@ -36,17 +37,3 @@ export const slackThreadFromSession = (
   }
   return null;
 };
-
-/**
- * Builds a Slack message permalink from its channel and timestamp.
- *
- * @param channelId - Slack channel ID containing the message.
- * @param ts - Slack message timestamp, including its fractional separator.
- * @param host - Workspace hostname; defaults to slack.com.
- * @returns The archive URL with the timestamp formatted for Slack's permalink path.
- */
-export const buildPermalink = (
-  channelId: string,
-  ts: string,
-  host = "slack.com"
-): string => `https://${host}/archives/${channelId}/p${ts.replace(".", "")}`;

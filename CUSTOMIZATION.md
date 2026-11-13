@@ -97,7 +97,7 @@ Use a skill for a procedure the agent only needs for certain tasks. The existing
 
 Change `model` in [agent/agent.ts](agent/agent.ts) to use another [AI Gateway model](https://vercel.com/ai-gateway/models). The template uses `anthropic/claude-opus-5.5-fast` and authenticates with Vercel OIDC. For other hosting environments, see [AI Gateway authentication](https://vercel.com/docs/ai-gateway/authentication-and-byok).
 
-The same file limits each session to `5_000_000` input tokens and `100_000` output tokens through `maxInputTokensPerSession` and `maxOutputTokensPerSession`. Increase the input limit if sessions stop after reading large amounts of content, or the output limit if they stop after generating long responses. See [eve's agent configuration](https://eve.dev/docs/agent-config) for the supported settings.
+The same file's `sessionUsage` limit asks in Slack whether to continue once a session reads `5_000_000` new input tokens, which excludes cached history, or writes `100_000` output tokens. Continuing resets both counts. Raise the input limit if sessions ask after reading large amounts of content, or the output limit if they ask after generating long responses. See [eve's runtime limits](https://eve.dev/docs/agent-config#runtime-limits) for the supported settings.
 
 The [current-time instructions](agent/instructions/current-time.ts) add a UTC timestamp at the start of each turn. If you add regional date conventions, explain the intended timezone in your instructions so editorial dates remain unambiguous.
 
@@ -154,7 +154,7 @@ To restrict editing or approval to designated people, follow the [team directory
 
 ### Customize approval cards and handle failed operations
 
-To change the approval card's wording or layout, edit [publication-message.ts](agent/lib/contentful/publication-message.ts). Keep the list of entries and assets visible so the approver knows what will be published. The button handling in [publication-input.ts](agent/lib/contentful/publication-input.ts) also checks that Slack received the card before accepting approval; preserve this check.
+To change the approval card's wording or layout, edit [publication-message.ts](agent/lib/contentful/publication-message.ts). Keep the list of entries and assets visible so the approver knows what will be published. The Slack renderer in [publication-input.ts](agent/lib/contentful/publication-input.ts) posts that list as the details of eve's approval card, above its Approve and Deny buttons, and records that Slack received the card before publication can run; preserve this check. eve deletes the list once the request is answered, and the card keeps the requested entry IDs and versions as a record of the decision.
 
 Before publishing, the agent checks whether the entries have changed since the request was prepared. Publication stops at the first failure, so inspect the reported results before retrying: some items may already be live. If an operation involving asset uploads returns a recovery ID, give that ID to the agent and ask it to resume the operation. The saved record lets it reuse uploads that already succeeded.
 
@@ -198,7 +198,7 @@ Try a paragraph edit on a test entry and confirm that neighboring blocks and oth
 
 ## Control Slack replies
 
-Mention the agent or send it a direct message to start a conversation. In a thread with no other participants besides you and the agent, you can send follow-up messages without mentioning it again. Slack must be configured to send those messages to the agent and let it read the thread; see [eve's Slack setup guide](https://eve.dev/docs/channels/slack).
+Mention the agent or send it a direct message to start a conversation. Once the agent is part of a thread, it also sees replies that don't mention it. It answers the ones meant for it and stays quiet through the `no_reply` tool when people are talking to each other. Slack must be configured to send those messages to the agent and let it read the thread; see [eve's Slack setup guide](https://eve.dev/docs/channels/slack#reply-without-a-mention).
 
 To have the agent reply to new messages in selected channels without a mention, set:
 
@@ -208,19 +208,11 @@ SLACK_AUTO_REPLY_CHANNEL_IDS=C0123456789,C0987654321
 
 Replace the examples with Slack channel IDs. Only new posts from people start a reply in these channels, and users in other channels can still mention the agent or send it a direct message.
 
-To require mentions for thread follow-ups, add `autoReply: false` inside the existing `createSlackChannel` configuration in [agent/channels/slack.ts](agent/channels/slack.ts). Keep the `inputRequests` setting, which connects the custom publication card. Clear `SLACK_AUTO_REPLY_CHANNEL_IDS` as well to stop replies to new channel messages that don't mention the agent.
+The `routeSlackMessage` hook in [agent/channels/slack.ts](agent/channels/slack.ts) decides which messages reach the agent. To require mentions for thread follow-ups, remove its branch that returns `status: "deferred"`. Clear `SLACK_AUTO_REPLY_CHANNEL_IDS` as well to stop replies to new channel messages that don't mention the agent. Because the channel sets `onMessage` without `onAppMention` or `onDirectMessage`, this hook also decides mentions and direct messages.
 
 Other Slack apps and Workflows can start a conversation by mentioning the agent. Their turns run with the bot's Slack identity rather than a person's, so the agent can look up and draft content for them but won't change or publish entries or save writing preferences for a bot. When someone replies in the thread, the agent acts with that person's permissions.
 
-If you pass your own `onMessage` handler to `createSlackChannel`, it also receives mentions and direct messages unless you set `onAppMention` or `onDirectMessage`.
-
-The agent reads Slack profiles to identify people in conversations, using the `users:read` permission. It passes names and profile images to the model and never email addresses. To skip profile lookups for selected bot or service accounts, set:
-
-```dotenv
-SLACK_IDENTITY_EXCLUDED_USER_IDS=U0123456789,U0987654321
-```
-
-Excluded users can still interact with the agent; this setting only skips their profile lookups.
+The channel adds each person's Slack display name and real name to their messages through eve's `messageContext.users` option, which needs the `users:read` scope. It doesn't pass email addresses to the model. After upgrading from an earlier version of the template, add `users:read` to the Slack app's bot scopes, or to the Vercel Connect connector's **Bot Scopes**, and reinstall the app.
 
 ## Configure content search on Vercel Drives
 
@@ -405,7 +397,7 @@ pnpm exec eve info
 pnpm build
 ```
 
-The automated tests don't call the live Contentful API, so also test your configuration against a non-production Contentful environment. Ask the agent to read an entry and save a draft edit, then request publication in Slack. Confirm that the approval card lists the intended content and that cancelling leaves it unpublished.
+The automated tests don't call the live Contentful API, so also test your configuration against a non-production Contentful environment. Ask the agent to read an entry and save a draft edit, then request publication in Slack. Confirm that the approval card lists the intended content and that denying the request leaves it unpublished.
 
 Save any environment variable changes with the [CLI commands above](#where-to-change-environment-variables), then deploy:
 

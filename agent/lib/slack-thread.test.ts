@@ -1,8 +1,8 @@
 import type { SessionAuthContext } from "eve/context";
 import { describe, expect, it } from "vitest";
 
-import { buildPermalink, slackThreadFromSession } from "./session";
-import type { SlackSessionContext } from "./session";
+import { slackThreadFromSession } from "./slack-thread";
+import type { SlackSessionContext } from "./slack-thread";
 
 const context = (
   initiator: SessionAuthContext["attributes"] | null,
@@ -51,13 +51,5 @@ describe("slackThreadFromSession", () => {
         )
       )
     ).toBeNull();
-  });
-});
-
-describe("buildPermalink", () => {
-  it("builds a Slack permalink from a channel and timestamp", () => {
-    expect(
-      buildPermalink("C01234567", "1710000000.100", "slack.example.com")
-    ).toBe("https://slack.example.com/archives/C01234567/p1710000000100");
   });
 });

@@ -1,12 +1,15 @@
-import { z } from "zod";
 /**
- * Slack publication controls, delivery confirmation, and signed-responder admission.
+ * Slack publication approval card: the frozen publication plan as the card's details,
+ * and confirmed delivery before publication may execute.
  *
  * @packageDocumentation
  */
 
-import { inputRequestButtons } from "#lib/integrations/slack/input-requests";
-import type { SlackInputRequestsConfig } from "#lib/integrations/slack/input-requests";
+import { defineSlackRenderer } from "eve/channels/slack";
+import type { SlackCardMessage } from "eve/channels/slack";
+import { interaction } from "eve/events";
+import type { Interaction } from "eve/events";
+import { z } from "zod";
 
 import { formatContentfulPublicationPreview } from "./publication-message";
 import {
@@ -14,50 +17,52 @@ import {
   recordContentfulPublicationPreview,
 } from "./publication-state";
 
-const PUBLICATION_CONTROLS = "contentful_publication";
+const PUBLISH_TOOL = "publish_contentful_entry";
+type AskedCall = NonNullable<Interaction["call"]>;
 
-/* Render the frozen scope with native controls and checkpoint confirmed delivery. */
-export const contentfulPublicationInput: SlackInputRequestsConfig = {
-  render(request) {
-    if (
-      request.kind !== "tool-approval" ||
-      request.action.toolName !== "publish_contentful_entry"
-    ) {
-      return;
-    }
-    const { callId, input } = request.action;
-    const plan = getContentfulPublicationForApproval(
-      callId,
-      z.json().parse(input)
-    );
-    const preview = formatContentfulPublicationPreview(plan);
-    const blocks = preview.blocks.map((block) =>
-      block.type === "container"
-        ? {
-            ...block,
-            child_blocks: [
-              ...block.child_blocks,
-              {
-                block_id: PUBLICATION_CONTROLS,
-                elements: inputRequestButtons(request, {
-                  approve: "Publish",
-                  cancel: "Cancel",
-                }),
-                type: "actions",
-              },
-            ],
-          }
-        : block
-    );
-    return {
-      blocks,
-      onPosted: (messageId) =>
-        recordContentfulPublicationPreview(
-          callId,
-          z.json().parse(input),
-          messageId
-        ),
-      text: preview.text,
-    };
+const isPublication = (call: AskedCall | undefined): call is AskedCall =>
+  call?.name === PUBLISH_TOOL;
+
+/* Render the saved plan; throws when the call has no matching approval plan. */
+const preview = ({ callId, input }: AskedCall): SlackCardMessage =>
+  formatContentfulPublicationPreview(
+    getContentfulPublicationForApproval(callId, z.json().parse(input))
+  );
+
+/**
+ * Shows the frozen publication plan on Slack approval cards for `publish_contentful_entry`.
+ *
+ * @remarks
+ * `interactionCard` posts the plan as the card's details message ahead of eve's controls. The
+ * `interaction.opened` handler fails closed: it posts no card when the
+ * saved plan can't be rendered, and records delivery only after eve posted the card, so
+ * `publishPlannedContentfulEntries` refuses to run a plan nobody was shown. Rendering reads the
+ * saved plan and never rebuilds or expands the approved scope.
+ */
+export const contentfulPublicationCard = defineSlackRenderer({
+  events: {
+    async "interaction.opened"(event, ctx, renderDefault) {
+      const call = interaction(ctx.view, event.data.interactionId)?.call;
+      if (event.data.request.kind !== "approval" || !isPublication(call)) {
+        return renderDefault();
+      }
+      // Throws before eve posts anything, so no controls appear without the plan.
+      preview(call);
+      await renderDefault();
+      recordContentfulPublicationPreview(
+        call.callId,
+        z.json().parse(call.input),
+        event.data.interactionId
+      );
+    },
   },
-};
+  interactionCard(card, renderDefault) {
+    const parts = renderDefault(card);
+    const { call, request, status } = card.interaction;
+    return request.kind === "approval" &&
+      status === "open" &&
+      isPublication(call)
+      ? { ...parts, details: preview(call) }
+      : parts;
+  },
+});

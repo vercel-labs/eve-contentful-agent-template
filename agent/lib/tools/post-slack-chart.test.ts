@@ -2,12 +2,12 @@ import type { callSlackApi } from "eve/channels/slack";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 
-import { slackApi } from "../integrations/slack/api";
-import { visualizationReceipts } from "../integrations/slack/visualizations/receipts";
 import type { JsonValue } from "../json";
 import { slackAuth, toolContext } from "../testing/session";
 import { testState, installTestState } from "../testing/state";
 import { isCallable } from "../values";
+import { visualizationDelivery } from "../visualizations/post";
+import { visualizationReceipts } from "../visualizations/receipts";
 import tool from "./post-slack-chart";
 
 const { postMock } = vi.hoisted(() => ({
@@ -356,6 +356,8 @@ describe("Slack charts", () => {
 beforeEach(installTestState);
 
 beforeEach(() => {
-  vi.spyOn(slackApi, "request").mockImplementation(postMock);
-  vi.spyOn(slackApi, "credentials").mockReturnValue({ botToken: "test-token" });
+  vi.spyOn(visualizationDelivery, "request").mockImplementation(postMock);
+  vi.spyOn(visualizationDelivery, "credentials").mockReturnValue({
+    botToken: "test-token",
+  });
 });

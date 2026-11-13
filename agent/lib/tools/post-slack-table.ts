@@ -1,11 +1,11 @@
 import { defineTool } from "eve/tools";
 import { z } from "zod";
 
+import { isString } from "../values";
 import {
   postVisualization,
   visualizationOutputSchema,
-} from "../integrations/slack/visualizations/post";
-import { isString } from "../values";
+} from "../visualizations/post";
 
 /**
  * Slack chat.postMessage text hard limit, with headroom left for the code fence and title

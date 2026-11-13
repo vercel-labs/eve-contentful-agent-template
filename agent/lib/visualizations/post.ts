@@ -1,13 +1,19 @@
+import { connectSlackCredentials } from "@vercel/connect/eve";
+import { callSlackApi } from "eve/channels/slack";
 import { z } from "zod";
 
-import type { JsonObject } from "../../../json";
-import { requireEnv } from "../../../utils/env";
-import { slackApi } from "../api";
-import { slackThreadFromSession } from "../session";
-import type { SlackSessionContext } from "../session";
+import type { JsonObject } from "../json";
+import { slackThreadFromSession } from "../slack-thread";
+import type { SlackSessionContext } from "../slack-thread";
+import { requireEnv } from "../utils/env";
 import { recordVisualizationDelivery } from "./receipts";
 
-export const visualizationDelivery = { record: recordVisualizationDelivery };
+/** Delivery dependencies, replaceable in tests. */
+export const visualizationDelivery = {
+  credentials: connectSlackCredentials,
+  record: recordVisualizationDelivery,
+  request: callSlackApi,
+};
 
 const BLOCK_ERROR = /block/iu;
 
@@ -44,11 +50,11 @@ export const postVisualization = async (
     };
   }
   try {
-    const { botToken } = slackApi.credentials(
+    const { botToken } = visualizationDelivery.credentials(
       requireEnv("SLACK_CONNECTOR", "slack/your-agent")
     );
     const post = (body: JsonObject) =>
-      slackApi.request({
+      visualizationDelivery.request({
         body: {
           channel: thread.channelId,
           thread_ts: thread.ts,

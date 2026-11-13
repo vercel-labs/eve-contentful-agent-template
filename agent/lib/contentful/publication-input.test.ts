@@ -1,14 +1,16 @@
-import type { SlackThread } from "eve/channels/slack";
+import { renderInteractionBlocks } from "eve/channels/slack";
+import type {
+  SlackCardMessage,
+  SlackInteractionCard,
+} from "eve/channels/slack";
+import { emptySessionView, foldEvents, interaction } from "eve/events";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import publishTool from "../../tools/publish_contentful_entry";
-import { createInputRequestEvents } from "../integrations/slack/input-requests";
-import type { SlackInputRequest } from "../integrations/slack/input-requests";
 import { approvalContext, toolContext } from "../testing/session";
-import { slackEventContext } from "../testing/slack";
 import { installTestState, testState } from "../testing/state";
 import { isCallable } from "../values";
-import { contentfulPublicationInput } from "./publication-input";
+import { contentfulPublicationCard } from "./publication-input";
 import { createCmaFake, link } from "./testing/cma";
 
 const input = {
@@ -20,22 +22,84 @@ if (!policy || !("request" in policy) || !isCallable(policy.request)) {
   throw new Error("Publication requires a request policy.");
 }
 const { request } = policy;
-const metadata = { sequence: 1, stepIndex: 0, turnId: "turn-1" };
-const approval: SlackInputRequest = {
-  action: {
-    callId: "call-1",
-    input,
-    kind: "tool-call",
-    toolName: "publish_contentful_entry",
+const opened = contentfulPublicationCard.events?.["interaction.opened"];
+const { interactionCard } = contentfulPublicationCard;
+if (!(opened && interactionCard)) {
+  throw new Error("Expected publication card renderers.");
+}
+
+const at = "2026-10-20T00:00:00.000Z";
+/* A session view where the publish call is waiting on approval-1. */
+const view = foldEvents(emptySessionView(), [
+  {
+    data: {
+      callId: "call-1",
+      capability: { kind: "tool", name: "publish_contentful_entry" },
+      input,
+      owner: { turnId: "turn-1" },
+    },
+    meta: { at, position: { index: 0, line: 0 } },
+    scope: { turnId: "turn-1" },
+    type: "call.requested",
   },
-  kind: "tool-approval",
-  options: [
-    { id: "approve", label: "Approve", style: "primary" },
-    { id: "cancel", label: "Cancel" },
-  ],
-  prompt: "Approve publication?",
-  requestId: "approval-1",
+  {
+    data: {
+      interactionId: "approval-1",
+      request: {
+        kind: "approval",
+        options: [
+          { id: "approve", label: "Approve" },
+          { id: "deny", label: "Deny" },
+        ],
+        prompt: "Approve publication?",
+      },
+      subject: { callId: "call-1" },
+    },
+    meta: { at, position: { index: 0, line: 1 } },
+    scope: { turnId: "turn-1" },
+    type: "interaction.opened",
+  },
+]);
+const approval = interaction(view, "approval-1");
+if (!approval) {
+  throw new Error("Expected the approval in the session view.");
+}
+const card: SlackInteractionCard = {
+  audience: "public",
+  destination: "thread",
+  interaction: approval,
+  view,
 };
+/* eve's default controls message for a card. */
+const defaultParts = (current: SlackInteractionCard) => ({
+  controls: {
+    blocks: renderInteractionBlocks(current.interaction),
+    text: current.interaction.request.prompt,
+  },
+});
+/* Delivers interaction.opened with a stand-in for eve's default card posting. */
+const open = (next: () => Promise<void>) =>
+  opened(
+    {
+      data: {
+        interactionId: "approval-1",
+        request: approval.request,
+        subject: { callId: "call-1" },
+      },
+      scope: { turnId: "turn-1" },
+      type: "interaction.opened",
+    },
+    // SAFETY: The handler reads only the session view from its context.
+    { view } as Parameters<typeof opened>[1],
+    next
+  );
+/* Action IDs of eve's controls, which a renderer must keep. */
+const controlsOf = (message: SlackCardMessage | undefined) =>
+  [
+    ...JSON.stringify(message ?? null).matchAll(
+      /"action_id":"(?<id>eve_input[^"]*)"/gu
+    ),
+  ].map((match) => match.groups?.id);
 const seed = () =>
   createCmaFake({
     entries: [
@@ -49,45 +113,56 @@ const seed = () =>
       },
     ],
   });
-const deliver = (post: SlackThread["post"]) => {
-  const channel = slackEventContext({ thread: { post } });
-  return {
-    channel,
-    run: () =>
-      createInputRequestEvents(contentfulPublicationInput)["input.requested"](
-        { ...metadata, requests: [approval] },
-        channel
-      ),
-  };
-};
 
 beforeEach(() => testState.reset());
 
-describe("publication card delivery", () => {
-  it("lists the saved scope and unlocks publication only after confirmed delivery", async () => {
+describe("publication card", () => {
+  it("shows the saved scope as details beside eve's controls", async () => {
+    seed();
+    expect(await request(approvalContext(input))).toBe("user-approval");
+
+    const parts = interactionCard(card, defaultParts);
+    const fallback = defaultParts(card);
+
+    expect(JSON.stringify(parts.details)).toContain("Example entry");
+    expect(parts.details?.text).toContain("Content Preview");
+    expect(controlsOf(parts.details)).toEqual([]);
+    expect(parts.controls).toEqual(fallback.controls);
+    expect(controlsOf(parts.controls)).not.toEqual([]);
+  });
+
+  it("drops the details once the request settles", async () => {
+    seed();
+    await request(approvalContext(input));
+    const settled = {
+      ...card,
+      interaction: { ...approval, status: "settled" as const },
+    };
+    expect(interactionCard(settled, defaultParts).details).toBeUndefined();
+  });
+
+  it("leaves other requests to eve's default", () => {
+    const other = {
+      ...card,
+      interaction: { ...approval, call: { callId: "call-2", name: "other" } },
+    };
+    expect(interactionCard(other, defaultParts)).toEqual(defaultParts(other));
+  });
+
+  it("unlocks publication only after eve posts the card", async () => {
     const cma = seed();
     expect(await request(approvalContext(input))).toBe("user-approval");
     await expect(publishTool.execute(input, toolContext())).rejects.toThrow(
       "not been shown"
     );
 
-    const post = vi.fn<SlackThread["post"]>(
-      async () => await { id: "card-ts", raw: { ok: true } }
-    );
-    const { channel, run } = deliver(post);
-    await run();
-
-    expect(post).toHaveBeenCalledOnce();
-    const card = post.mock.calls[0]?.[0];
-    const serialized = JSON.stringify(card);
-    expect(serialized).toContain("Example entry");
-    expect(serialized).toContain(
-      '"action_id":"eve_input:tool-approval:approval-1:button:0"'
-    );
-    expect(serialized).toContain('"text":"Publish"');
-    expect(channel.state.pendingApprovalCards?.["approval-1"]?.messageTs).toBe(
-      "card-ts"
-    );
+    const next = vi.fn(async () => {
+      await expect(publishTool.execute(input, toolContext())).rejects.toThrow(
+        "not been shown"
+      );
+    });
+    await open(next);
+    expect(next).toHaveBeenCalledOnce();
     expect(cma.writes()).toHaveLength(0);
 
     expect(await publishTool.execute(input, toolContext())).toMatchObject({
@@ -96,26 +171,23 @@ describe("publication card delivery", () => {
     expect(cma.writes()).toHaveLength(1);
   });
 
-  it.each([
-    { id: "", raw: { ok: true } },
-    { id: "card-ts", raw: { ok: false } },
-  ])(
-    "keeps publication blocked after unconfirmed delivery %j",
-    async (result) => {
-      const cma = seed();
-      expect(await request(approvalContext(input))).toBe("user-approval");
-      const post = vi.fn<SlackThread["post"]>(async () => await result);
-      const { channel, run } = deliver(post);
+  it("keeps publication blocked when Slack delivery fails", async () => {
+    const cma = seed();
+    await request(approvalContext(input));
+    await expect(
+      open(() => Promise.reject(new Error("channel_not_found")))
+    ).rejects.toThrow("channel_not_found");
+    await expect(publishTool.execute(input, toolContext())).rejects.toThrow(
+      "not been shown"
+    );
+    expect(cma.writes()).toHaveLength(0);
+  });
 
-      await expect(run()).rejects.toThrow("Could not confirm delivery");
-      expect(post).toHaveBeenCalledOnce();
-      expect(channel.state.pendingApprovalCards).toBeUndefined();
-      await expect(publishTool.execute(input, toolContext())).rejects.toThrow(
-        "not been shown"
-      );
-      expect(cma.writes()).toHaveLength(0);
-    }
-  );
+  it("posts no card without a saved plan", async () => {
+    const next = vi.fn(() => Promise.resolve());
+    await expect(open(next)).rejects.toThrow("No saved publication");
+    expect(next).not.toHaveBeenCalled();
+  });
 });
 
 beforeEach(installTestState);

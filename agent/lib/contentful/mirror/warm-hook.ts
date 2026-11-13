@@ -25,16 +25,14 @@ const usesMirrorSql = defineState<boolean>(
 const hosted = () => process.env.VERCEL === "1";
 
 /**
- * Reports whether a model step asks to load the SQL skill.
+ * Reports whether a requested call loads the SQL skill.
  *
- * @param event - Actions requested by one model step.
- * @returns True when any requested action loads {@link MIRROR_SQL_SKILL}.
+ * @param event - One call requested by a model step.
+ * @returns True when the call loads {@link MIRROR_SQL_SKILL}.
  */
-const requestsMirrorSql = (event: HookEvent<"actions.requested">): boolean =>
-  event.data.actions.some(
-    (action) =>
-      action.kind === "load-skill" && action.input.skill === MIRROR_SQL_SKILL
-  );
+const requestsMirrorSql = (event: HookEvent<"call.requested">): boolean =>
+  event.data.capability.kind === "skill" &&
+  event.data.capability.name === MIRROR_SQL_SKILL;
 
 /** The part of the hook context the warm-up needs. */
 interface WarmContext {
@@ -44,12 +42,12 @@ interface WarmContext {
 /**
  * Records SQL use and warms the sandbox when a step loads the SQL skill.
  *
- * @param event - Actions requested by one model step.
+ * @param event - One call requested by a model step.
  * @param ctx - Context providing the session's sandbox.
  * @remarks SQL is about to run, so waking the sandbox now overlaps the warm-up with the model writing its query.
  */
 export const warmOnSkillLoad = async (
-  event: HookEvent<"actions.requested">,
+  event: HookEvent<"call.requested">,
   ctx: WarmContext
 ): Promise<void> => {
   if (!requestsMirrorSql(event)) {
@@ -75,7 +73,7 @@ export const warmOnTurnStart = async (ctx: WarmContext): Promise<void> => {
 
 export default defineHook({
   events: {
-    "actions.requested": warmOnSkillLoad,
+    "call.requested": warmOnSkillLoad,
     "turn.started": (_event, ctx) => warmOnTurnStart(ctx),
   },
 });
