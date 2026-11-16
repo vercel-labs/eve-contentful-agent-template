@@ -32,7 +32,11 @@ export type CreateSlackChannelConfig = Omit<
   autoReply?: boolean;
   /** Channels whose new human-authored top-level posts should start an agent reply without a mention. */
   autoReplyChannelIds?: readonly string[];
-  /** Additions to eve's approval and question cards, such as Contentful publication previews and their delivery receipts. */
+  /**
+   * Additions to eve's approval and question cards, such as Contentful publication previews and their delivery receipts.
+   *
+   * @remarks Details always post in the shared thread. Keep requests that have details on eve's default `"thread"` destination, because an `approvalChannel` that sends them to a DM or an ephemeral message would separate the details from their controls.
+   */
   interactions?: SlackInteractionsConfig;
 };
 

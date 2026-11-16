@@ -143,6 +143,28 @@ describe("publication access and frozen scope", () => {
       })
     ).toMatchObject({ status: "rejected" });
   });
+  it("refuses page publication from a delegated session", async () => {
+    const cma = seed();
+    const ctx = approvalContext(input);
+    expect(
+      await request({
+        ...ctx,
+        session: {
+          ...ctx.session,
+          parent: {
+            callId: "parent-call",
+            rootSessionId: "root-session",
+            sessionId: "root-session",
+            turn: { id: "parent-turn", sequence: 1 },
+          },
+        },
+      })
+    ).toMatchObject({
+      reason: expect.stringContaining("main conversation"),
+      type: "denied",
+    });
+    expect(cma.writes()).toHaveLength(0);
+  });
   it("requires a confirmed Slack preview before publication", async () => {
     const cma = seed();
     expect(await request(approvalContext(input))).toBe("user-approval");

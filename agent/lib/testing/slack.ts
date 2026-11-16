@@ -242,6 +242,8 @@ interface InteractionFixtureOptions {
   interactionId?: string;
   /** What the person is asked, default a tool approval with Approve and Deny. */
   request?: InteractionOpenedEvent["data"]["request"];
+  /** Turn the request opens in, default `turn-1`. Each turn's requests open together in one model step. */
+  turnId?: string;
 }
 
 const DEFAULT_APPROVAL: InteractionOpenedEvent["data"]["request"] = {
@@ -253,63 +255,97 @@ const DEFAULT_APPROVAL: InteractionOpenedEvent["data"]["request"] = {
   prompt: "Approve this action?",
 };
 
+/* One stored line of facts, as eve writes them: each fact's index in the line, and an end marker on the last. */
+const storedLine = (
+  facts: readonly { data: unknown; scope?: unknown; type: string }[],
+  line: number
+) =>
+  facts.map((fact, index) => ({
+    ...fact,
+    meta: {
+      at: "2026-11-16T00:00:00.000Z",
+      endOfLine: index === facts.length - 1,
+      position: { index, line },
+    },
+  }));
+
+/**
+ * Builds the `interaction.opened` events for requests a model step asks together, and the session view eve records with them.
+ *
+ * @param requests - Each request, its interaction ID, and the call it asks about, in the order eve opens them.
+ * @returns The events, in order, and a view folded from each turn's start, its calls, and one stored line holding that turn's requests, so eve batches them as it does in a channel.
+ */
+export const interactionBatchFixture = (
+  requests: readonly InteractionFixtureOptions[]
+) => {
+  const events = requests.map(
+    ({
+      call,
+      interactionId = "approval-1",
+      request = DEFAULT_APPROVAL,
+      turnId = "turn-1",
+    }): InteractionOpenedEvent => ({
+      data: {
+        interactionId,
+        request,
+        subject: call ? { callId: call.callId } : { turnId },
+      },
+      scope: { turnId },
+      type: "interaction.opened",
+    })
+  );
+  const turnIds = [...new Set(requests.map(({ turnId = "turn-1" }) => turnId))];
+  const lines = turnIds.flatMap((turnId, turnIndex) => {
+    const scope = { turnId };
+    const inTurn = requests.filter(
+      (request) => (request.turnId ?? "turn-1") === turnId
+    );
+    const calls = inTurn.flatMap(({ call }) =>
+      call
+        ? [
+            {
+              data: {
+                callId: call.callId,
+                capability: { kind: "tool", name: call.name },
+                input: call.input,
+                owner: { turnId },
+              },
+              scope,
+              type: "call.requested",
+            },
+          ]
+        : []
+    );
+    const turnStarted = {
+      data: {
+        cause: { deliveryId: `delivery-${turnIndex + 1}` },
+        follows: turnIds[turnIndex - 1] ?? null,
+        turnId,
+      },
+      scope,
+      type: "turn.started",
+    };
+    const opened = events.filter((event) => event.scope?.turnId === turnId);
+    return [[turnStarted], calls, opened].filter((line) => line.length > 0);
+  });
+  const view = foldEvents(
+    emptySessionView(),
+    lines.flatMap((line, index) => storedLine(line, index))
+  );
+  return { events, view };
+};
+
 /**
  * Builds an `interaction.opened` event and the session view eve records with it.
  *
  * @param options - The request, its interaction ID, and the call it asks about.
  * @returns The event and a view folded from the turn, call, and interaction facts, so `eve/events` selectors read it as eve's renderers do.
  */
-export const interactionFixture = ({
-  call,
-  interactionId = "approval-1",
-  request = DEFAULT_APPROVAL,
-}: InteractionFixtureOptions = {}) => {
-  const scope = { turnId: "turn-1" };
-  const event: InteractionOpenedEvent = {
-    data: {
-      interactionId,
-      request,
-      subject: call ? { callId: call.callId } : { turnId: "turn-1" },
-    },
-    scope,
-    type: "interaction.opened",
-  };
-  const facts = [
-    {
-      data: {
-        cause: { deliveryId: "delivery-1" },
-        follows: null,
-        turnId: "turn-1",
-      },
-      scope,
-      type: "turn.started",
-    },
-    ...(call
-      ? [
-          {
-            data: {
-              callId: call.callId,
-              capability: { kind: "tool", name: call.name },
-              input: call.input,
-              owner: { turnId: "turn-1" },
-            },
-            scope,
-            type: "call.requested",
-          },
-        ]
-      : []),
-    event,
-  ];
-  const view = foldEvents(
-    emptySessionView(),
-    facts.map((fact, line) => ({
-      ...fact,
-      meta: {
-        at: "2026-11-16T00:00:00.000Z",
-        endOfLine: true,
-        position: { index: 0, line },
-      },
-    }))
-  );
+export const interactionFixture = (options: InteractionFixtureOptions = {}) => {
+  const { events, view } = interactionBatchFixture([options]);
+  const [event] = events;
+  if (!event) {
+    throw new Error("The fixture must open one request.");
+  }
   return { event, view };
 };

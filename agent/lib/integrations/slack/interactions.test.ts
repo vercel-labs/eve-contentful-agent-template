@@ -7,8 +7,10 @@ import type {
 } from "eve/channels/slack";
 import { interaction } from "eve/events";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { z } from "zod";
 
 import {
+  interactionBatchFixture,
   interactionFixture,
   rendererContext,
   slackEventContext,
@@ -183,6 +185,133 @@ const labels = () => ({ approve: "Publish", deny: "Cancel" });
 const actionIds = (message: SlackInteractionCardParts["controls"]) =>
   JSON.stringify(message).match(/"action_id":"[^"]+"/gu);
 
+/* An approval for another tool, then a publication approval, asked in one model step. */
+const mixedBatch = () =>
+  interactionBatchFixture([
+    {
+      call: { callId: "call-other", input: {}, name: "other_tool" },
+      interactionId: "approval-other",
+    },
+    { call: { ...call, callId: "call-2" }, interactionId: "approval-2" },
+  ]);
+/* Details only for the publication approval. */
+const publicationOnlyDetails: SlackInteractionsConfig["details"] = (request) =>
+  request.call?.name === "publish_contentful_entry"
+    ? { ...details, text: `Plan for ${request.interactionId}` }
+    : undefined;
+
+/* The notification text of a posted message, so tests can read the order of posts. */
+const postedText = (message: Parameters<SlackThread["post"]>[0]) =>
+  z.object({ text: z.string() }).safeParse(message).data?.text ?? "details";
+
+/* Renders the mixed batch's events with one Slack thread, recording the order of posts and eve's controls. */
+const runMixedBatch = (post: SlackThread["post"]) => {
+  const { events, view } = mixedBatch();
+  const handler = createInteractionRenderer({
+    details: publicationOnlyDetails,
+  }).events?.["interaction.opened"];
+  if (!handler) {
+    throw new Error("The renderer must handle interaction.opened.");
+  }
+  const order: string[] = [];
+  const next = vi.fn<SlackRenderNext<"interaction.opened">>(() => {
+    order.push("controls");
+    return Promise.resolve();
+  });
+  const ctx = {
+    ...rendererContext(slackEventContext({ thread: { post } })),
+    view,
+  };
+  return {
+    next,
+    order,
+    runEvent: (index: number) => {
+      const event = events[index];
+      if (!event) {
+        throw new Error(`The batch has no request ${index}.`);
+      }
+      return handler(event, ctx, next);
+    },
+  };
+};
+
+describe("interaction details in a batch", () => {
+  it("posts a later request's details before eve posts the batch's controls", async () => {
+    const harness = runMixedBatch(
+      vi.fn<SlackThread["post"]>((message) => {
+        harness.order.push(postedText(message));
+        return Promise.resolve({ id: "details-ts", raw: { ok: true } });
+      })
+    );
+
+    // eve posts every request's controls while handling the first.
+    await harness.runEvent(0);
+    expect(harness.order).toEqual(["Plan for approval-2", "controls"]);
+
+    // The publication approval's own event finds its details already posted.
+    await harness.runEvent(1);
+    expect(harness.order).toEqual([
+      "Plan for approval-2",
+      "controls",
+      "controls",
+    ]);
+  });
+
+  it("leaves an open request from an earlier turn to its own event", async () => {
+    const { events, view } = interactionBatchFixture([
+      {
+        call: { ...call, callId: "call-old" },
+        interactionId: "approval-old",
+      },
+      {
+        call: { ...call, callId: "call-new" },
+        interactionId: "approval-new",
+        turnId: "turn-2",
+      },
+    ]);
+    const post = vi.fn<SlackThread["post"]>(
+      async () => await { id: "details-ts", raw: { ok: true } }
+    );
+    const handler = createInteractionRenderer({
+      details: (request) => {
+        if (request.interactionId === "approval-old") {
+          throw new Error("No saved plan for the earlier request.");
+        }
+        return details;
+      },
+    }).events?.["interaction.opened"];
+    const next = vi.fn<SlackRenderNext<"interaction.opened">>(() =>
+      Promise.resolve()
+    );
+    const [, event] = events;
+    if (!(handler && event)) {
+      throw new Error("The fixture must open the later request.");
+    }
+    await handler(
+      event,
+      {
+        ...rendererContext(slackEventContext({ thread: { post } })),
+        view,
+      },
+      next
+    );
+    expect(post).toHaveBeenCalledOnce();
+    expect(next).toHaveBeenCalledOnce();
+  });
+
+  it("withholds the whole batch's controls when a later request's details fail", async () => {
+    const harness = runMixedBatch(
+      vi.fn<SlackThread["post"]>(
+        async () => await { id: "", raw: { ok: false } }
+      )
+    );
+    await expect(harness.runEvent(0)).rejects.toThrow(
+      "Could not confirm delivery"
+    );
+    expect(harness.next).not.toHaveBeenCalled();
+  });
+});
+
 describe("interaction control labels", () => {
   it("relabels eve's buttons and keeps their action IDs and values", () => {
     const { defaults, parts } = render({ labels });
@@ -193,10 +322,29 @@ describe("interaction control labels", () => {
     expect(actionIds(parts.controls)?.length).toBeGreaterThan(0);
   });
 
-  it("keeps eve's card when no labels apply or the request has settled", () => {
-    const unlabeled = render({ labels: () => {} });
-    expect(unlabeled.parts).toEqual(unlabeled.defaults);
-    const settled = render({ labels }, card("settled"));
-    expect(settled.parts).toEqual(settled.defaults);
+  it("keeps eve's card unchanged when no labels apply", () => {
+    const input = card();
+    const renderDefault = vi.fn(eveDefault);
+    createInteractionRenderer({ labels: () => {} }).interactionCard?.(
+      input,
+      renderDefault
+    );
+    expect(renderDefault).toHaveBeenCalledExactlyOnceWith(input);
+  });
+
+  it("gives eve the labels for an answered card's ending line too", () => {
+    const renderDefault = vi.fn(eveDefault);
+    createInteractionRenderer({ labels }).interactionCard?.(
+      card("settled"),
+      renderDefault
+    );
+    expect(
+      renderDefault.mock.calls[0]?.[0].interaction.request.options?.map(
+        (option) => [option.id, option.label]
+      )
+    ).toEqual([
+      ["approve", "Publish"],
+      ["deny", "Cancel"],
+    ]);
   });
 });

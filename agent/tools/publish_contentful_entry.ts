@@ -15,7 +15,7 @@ import { withLocale } from "../lib/contentful/tool-locale";
 /**
  * Publishes a frozen Contentful dependency plan after the applicable human approval.
  *
- * @remarks Any authenticated user can approve. Batches containing pages require a delivered Slack plan; explicit component-only batches may proceed immediately.
+ * @remarks Any authenticated user can approve. Batches containing pages require a delivered Slack plan, so a delegated session such as an `agent` task copy can't request them; explicit component-only batches may proceed immediately.
  */
 export default defineTool({
   approval: {
@@ -28,6 +28,12 @@ export default defineTool({
         );
         if (!plan.requiresApproval) {
           return "not-applicable";
+        }
+        // A delegated copy keeps its own state, so the main conversation's Slack card could never record this plan.
+        if (session.parent) {
+          throw new Error(
+            "Publishing pages needs a Slack approval card, which only the main conversation can show. Ask for publication there."
+          );
         }
         if (!slackThreadFromSession({ session })) {
           throw new Error(
