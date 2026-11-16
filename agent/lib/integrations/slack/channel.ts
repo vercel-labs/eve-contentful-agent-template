@@ -13,8 +13,8 @@ import {
   createSlackIdentityResolver,
   formatSlackIdentityContext,
 } from "./identity";
-import { createInputRequestEvents } from "./input-requests";
-import type { SlackInputRequestsConfig } from "./input-requests";
+import { createInteractionRenderer } from "./interactions";
+import type { SlackInteractionsConfig } from "./interactions";
 import { replyEvents } from "./replies";
 
 /**
@@ -32,8 +32,12 @@ export type CreateSlackChannelConfig = Omit<
   autoReply?: boolean;
   /** Channels whose new human-authored top-level posts should start an agent reply without a mention. */
   autoReplyChannelIds?: readonly string[];
-  /** Custom input presentations, including Contentful publication previews and delivery receipts. */
-  inputRequests?: SlackInputRequestsConfig;
+  /**
+   * Additions to eve's approval and question cards, such as Contentful publication previews and their delivery receipts.
+   *
+   * @remarks Details always post in the shared thread. Keep requests that have details on eve's default `"thread"` destination, because an `approvalChannel` that sends them to a DM or an ephemeral message would separate the details from their controls.
+   */
+  interactions?: SlackInteractionsConfig;
 };
 
 type InboundHandlers = Pick<
@@ -81,8 +85,8 @@ const botPostAuth = (
  *
  * @param ctx - Verified inbound webhook context supplied by eve.
  * @param message - Slack message carrying user, workspace, channel, and thread identifiers.
- * @returns eve's authenticated Slack principal, or null to drop the message.
- * @remarks Other bots are accepted with a `service` principal, which cannot change Contentful content or answer publication requests. Bots with a Slack user get eve's principal, and bot posts without one, such as Slack Workflow messages, get a per-bot principal from their bot ID. The agent's own messages and other authorless messages are dropped, so no message falls back to a shared principal.
+ * @returns eve's authenticated Slack principal with an empty `history`, or null to drop the message.
+ * @remarks Other bots are accepted with a `service` principal, which cannot change Contentful content or answer publication requests. Bots with a Slack user get eve's principal, and bot posts without one, such as Slack Workflow messages, get a per-bot principal from their bot ID. The agent's own messages and other authorless messages are dropped, so no message falls back to a shared principal. The empty `history` keeps earlier thread replies in eve's attributed transcript. Without it, eve replays them as conversation turns when a mention starts a session, and another person's earlier request reads like one from the current sender.
  */
 export const handleExplicitInvocation = (
   ctx: SlackInboundMessageContext,
@@ -92,7 +96,7 @@ export const handleExplicitInvocation = (
     return null;
   }
   const auth = defaultSlackAuth(message, ctx) ?? botPostAuth(ctx, message);
-  return auth ? { auth } : null;
+  return auth ? { auth, history: [] } : null;
 };
 
 const autoReplyToSoleParticipant = async (
@@ -228,21 +232,30 @@ export const createSlackInboundHandlers = ({
 };
 
 /**
+ * Drops a person's edit to an earlier message, so an edit never starts another turn.
+ *
+ * @returns Always null, which tells eve to ignore the edit.
+ * @remarks Without an edit handler, eve sends an edit to a mention or DM through the same handlers as a new message, and an edit to a request the agent already handled would run it again. Pass `onMessageEdited` to {@link createSlackChannel} to deliver edits instead.
+ */
+export const ignoreMessageEdit = (): SlackInboundResult => null;
+
+/**
  * Creates the Slack channel using credentials from the configured Vercel Connect connector.
  *
  * @param config - Native channel overrides and optional reply or approval presentation settings.
  * @returns A channel definition with authenticated inbound routing and shared event renderers.
  * @throws {@link Error} When SLACK_CONNECTOR is missing.
- * @remarks Export this definition from agent/channels/slack.ts to retain the slack runtime name.
+ * @remarks Export this definition from agent/channels/slack.ts to retain the slack runtime name. Edits to earlier messages are ignored unless `onMessageEdited` is supplied, and a caller's handler runs without the identity context.
  */
 export const createSlackChannel = (config: CreateSlackChannelConfig = {}) => {
   const {
     autoReply,
     autoReplyChannelIds,
-    inputRequests,
+    interactions,
     onMessage,
     onAppMention,
     onDirectMessage,
+    onMessageEdited = ignoreMessageEdit,
     threadContext = { since: "thread-root" },
     ...channelConfig
   } = config;
@@ -260,12 +273,12 @@ export const createSlackChannel = (config: CreateSlackChannelConfig = {}) => {
     credentials: connectSlackCredentials(
       requireEnv("SLACK_CONNECTOR", "slack/your-agent")
     ),
+    onMessageEdited,
     // Caller renderers stay outermost so they can wrap the shared rendering.
     renderers: [
       ...(channelConfig.renderers ?? []),
-      {
-        events: { ...replyEvents, ...createInputRequestEvents(inputRequests) },
-      },
+      { events: replyEvents },
+      createInteractionRenderer(interactions),
     ],
     threadContext,
   });

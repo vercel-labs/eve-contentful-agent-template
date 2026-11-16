@@ -1,8 +1,5 @@
-import type {
-  Experimental_SandboxProcess,
-  Experimental_SandboxSession,
-} from "ai";
 import type { HookEvent } from "eve/hooks";
+import type { SandboxProcess, SandboxSession } from "eve/sandbox";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { installTestState, testState } from "../../testing/state";
@@ -13,9 +10,7 @@ import hook, {
   warmOnTurnStart,
 } from "./warm-hook";
 
-const meta = { at: "2026-10-20T00:00:00.000Z", id: "event-1" };
-
-const started: Experimental_SandboxProcess = {
+const started: SandboxProcess = {
   kill: () => Promise.resolve(),
   stderr: new ReadableStream(),
   stdout: new ReadableStream(),
@@ -24,25 +19,33 @@ const started: Experimental_SandboxProcess = {
 
 /* Context whose sandbox records spawned commands. */
 const warmContext = () => {
-  const spawn = vi.fn<Experimental_SandboxSession["spawn"]>(() =>
-    Promise.resolve(started)
-  );
+  const spawn = vi.fn<SandboxSession["spawn"]>(() => Promise.resolve(started));
   const getSandbox = vi.fn(() => Promise.resolve({ spawn }));
   return { ctx: { getSandbox }, getSandbox, spawn };
 };
 
-type Action = HookEvent<"actions.requested">["data"]["actions"][number];
-
-const loadSkill = (skill: string): Action => ({
-  callId: `call-${skill}`,
-  input: { skill },
-  kind: "load-skill",
+/* A call the model requested to load a skill. */
+const loadSkill = (skill: string): HookEvent<"call.requested"> => ({
+  data: {
+    callId: `call-${skill}`,
+    capability: { kind: "skill", name: skill },
+    input: { skill },
+    owner: { runId: "run-1" },
+  },
+  scope: { turnId: "turn-1" },
+  type: "call.requested",
 });
 
-const requested = (actions: Action[]): HookEvent<"actions.requested"> => ({
-  data: { actions, sequence: 3, stepIndex: 0, turnId: "turn-1" },
-  meta,
-  type: "actions.requested",
+/* A call the model requested to run a tool. */
+const callTool = (name: string): HookEvent<"call.requested"> => ({
+  data: {
+    callId: `call-${name}`,
+    capability: { kind: "tool", name },
+    input: {},
+    owner: { runId: "run-1" },
+  },
+  scope: { turnId: "turn-1" },
+  type: "call.requested",
 });
 
 beforeEach(() => {
@@ -54,7 +57,7 @@ beforeEach(() => {
 describe("mirror warm hook", () => {
   it("subscribes to skill loads and turn starts", () => {
     expect(Object.keys(hook.events ?? {}).toSorted()).toEqual([
-      "actions.requested",
+      "call.requested",
       "turn.started",
     ]);
   });
@@ -67,17 +70,22 @@ describe("mirror warm hook", () => {
 
   it("ignores other skills", async () => {
     const { ctx, getSandbox } = warmContext();
-    await warmOnSkillLoad(requested([loadSkill("contentful_api")]), ctx);
+    await warmOnSkillLoad(loadSkill("contentful_api"), ctx);
+    await warmOnTurnStart(ctx);
+    expect(getSandbox).not.toHaveBeenCalled();
+  });
+
+  it("ignores a tool that shares the SQL skill's name", async () => {
+    const { ctx, getSandbox } = warmContext();
+    await warmOnSkillLoad(callTool(MIRROR_SQL_SKILL), ctx);
     await warmOnTurnStart(ctx);
     expect(getSandbox).not.toHaveBeenCalled();
   });
 
   it("warms when the SQL skill loads, then at the start of each later turn", async () => {
     const { ctx, spawn } = warmContext();
-    await warmOnSkillLoad(
-      requested([loadSkill("contentful_api"), loadSkill(MIRROR_SQL_SKILL)]),
-      ctx
-    );
+    await warmOnSkillLoad(loadSkill("contentful_api"), ctx);
+    await warmOnSkillLoad(loadSkill(MIRROR_SQL_SKILL), ctx);
     expect(spawn).toHaveBeenCalledTimes(1);
     expect(spawn).toHaveBeenCalledWith({ command: MIRROR_PREFETCH_COMMAND });
 
@@ -88,7 +96,7 @@ describe("mirror warm hook", () => {
   it("remembers SQL use without warming in local sessions", async () => {
     vi.stubEnv("VERCEL", "");
     const { ctx, getSandbox } = warmContext();
-    await warmOnSkillLoad(requested([loadSkill(MIRROR_SQL_SKILL)]), ctx);
+    await warmOnSkillLoad(loadSkill(MIRROR_SQL_SKILL), ctx);
     await warmOnTurnStart(ctx);
     expect(getSandbox).not.toHaveBeenCalled();
     expect(testState.get("contentful.mirror-sql-used")).toBe(true);

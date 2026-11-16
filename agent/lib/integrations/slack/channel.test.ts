@@ -12,6 +12,7 @@ import { inboundContext, slackAuthor, slackMessage } from "../../testing/slack";
 import {
   createSlackInboundHandlers,
   handleExplicitInvocation,
+  ignoreMessageEdit,
   selectInboundHandlers,
 } from "./channel";
 
@@ -25,6 +26,12 @@ const identityContext = expect.stringContaining("Slack identities for message");
 const accepted = (auth: SessionAuthContext) => ({
   auth,
   context: [identityContext],
+});
+
+/* An explicit invocation also passes an empty history, so eve keeps earlier replies in its transcript. */
+const invoked = (auth: SessionAuthContext) => ({
+  ...accepted(auth),
+  history: [],
 });
 
 const context = (
@@ -96,6 +103,11 @@ const workflowPost = message({
 });
 
 describe("handleExplicitInvocation", () => {
+  it("keeps earlier thread replies in eve's transcript for a person's mention", async () => {
+    const result = await handleExplicitInvocation(inboundContext(), message());
+    expect(result).toStrictEqual({ auth: userAuth, history: [] });
+  });
+
   it("drops the agent's own messages", async () => {
     const result = await handleExplicitInvocation(
       inboundContext(),
@@ -120,7 +132,7 @@ describe("handleExplicitInvocation", () => {
       inboundContext(),
       workflowPost
     );
-    expect(result).toStrictEqual({ auth: workflowPostAuth });
+    expect(result).toStrictEqual({ auth: workflowPostAuth, history: [] });
   });
 
   it.each(["", "U123", "b0workflow", "B0-WORKFLOW", 42])(
@@ -215,12 +227,12 @@ describe("createSlackInboundHandlers", () => {
     });
     await expect(
       config.onAppMention?.(context(false), workflowBot)
-    ).resolves.toStrictEqual(accepted(workflowServiceAuth));
+    ).resolves.toStrictEqual(invoked(workflowServiceAuth));
 
     // A mention delivered as an ordinary message event is also explicit.
     const ctx = inboundContext({ mentioned: true });
     await expect(config.onMessage?.(ctx, workflowBot)).resolves.toStrictEqual(
-      accepted(workflowServiceAuth)
+      invoked(workflowServiceAuth)
     );
     expect(ctx.isSubscribed).not.toHaveBeenCalled();
   });
@@ -230,12 +242,13 @@ describe("createSlackInboundHandlers", () => {
     // The post has no Slack user and mentions no one, so no identity block is added.
     await expect(
       config.onAppMention?.(context(false), workflowPost)
-    ).resolves.toStrictEqual({ auth: workflowPostAuth });
+    ).resolves.toStrictEqual({ auth: workflowPostAuth, history: [] });
 
     // A mention delivered as an ordinary message event is also explicit.
     const ctx = inboundContext({ mentioned: true });
     await expect(config.onMessage?.(ctx, workflowPost)).resolves.toStrictEqual({
       auth: workflowPostAuth,
+      history: [],
     });
     expect(ctx.isSubscribed).not.toHaveBeenCalled();
   });
@@ -386,7 +399,7 @@ describe("createSlackInboundHandlers", () => {
       });
       await expect(
         config.onMessage?.(rootContext(), rootMessage())
-      ).resolves.toStrictEqual(accepted(rootAuth));
+      ).resolves.toStrictEqual(invoked(rootAuth));
       await expect(
         config.onMessage?.(context(true, ["U123"]), message())
       ).resolves.toBeNull();
@@ -403,10 +416,16 @@ describe("createSlackInboundHandlers", () => {
           thread: { listParticipants: () => Promise.resolve(["U123", "U456"]) },
         });
         await expect(config[hook]?.(ctx, rootMessage())).resolves.toStrictEqual(
-          accepted(userAuth)
+          invoked(userAuth)
         );
         expect(ctx.isSubscribed).not.toHaveBeenCalled();
       }
     );
+  });
+});
+
+describe("ignoreMessageEdit", () => {
+  it("drops every edit so it never starts another turn", () => {
+    expect(ignoreMessageEdit()).toBeNull();
   });
 });

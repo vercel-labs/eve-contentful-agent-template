@@ -2,8 +2,8 @@ import { defineState } from "../../../state";
 
 /**
  * Table and chart delivery outcomes for one turn. Suppress final prose only after successful
- * delivery with no failed visualization attempts. Explicit session-limit continuations
- * transfer ownership to the resumed turn without resetting outcomes.
+ * delivery with no failed visualization attempts. Continuing past a session usage limit resumes
+ * the same turn, so its outcomes carry over.
  * Keep the original table state key and structure for saved-session compatibility.
  */
 export const visualizationReceipts = defineState<{

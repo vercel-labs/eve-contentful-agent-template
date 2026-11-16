@@ -1,14 +1,18 @@
-import type { SlackThread } from "eve/channels/slack";
+import type { SlackRenderNext, SlackThread } from "eve/channels/slack";
+import { interaction } from "eve/events";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import publishTool from "../../tools/publish_contentful_entry";
-import { createInputRequestEvents } from "../integrations/slack/input-requests";
-import type { SlackInputRequest } from "../integrations/slack/input-requests";
+import { createInteractionRenderer } from "../integrations/slack/interactions";
 import { approvalContext, toolContext } from "../testing/session";
-import { slackEventContext } from "../testing/slack";
+import {
+  interactionFixture,
+  rendererContext,
+  slackEventContext,
+} from "../testing/slack";
 import { installTestState, testState } from "../testing/state";
 import { isCallable } from "../values";
-import { contentfulPublicationInput } from "./publication-input";
+import { contentfulPublicationInteractions } from "./publication-input";
 import { createCmaFake, link } from "./testing/cma";
 
 const input = {
@@ -20,22 +24,10 @@ if (!policy || !("request" in policy) || !isCallable(policy.request)) {
   throw new Error("Publication requires a request policy.");
 }
 const { request } = policy;
-const metadata = { sequence: 1, stepIndex: 0, turnId: "turn-1" };
-const approval: SlackInputRequest = {
-  action: {
-    callId: "call-1",
-    input,
-    kind: "tool-call",
-    toolName: "publish_contentful_entry",
-  },
-  kind: "tool-approval",
-  options: [
-    { id: "approve", label: "Approve", style: "primary" },
-    { id: "cancel", label: "Cancel" },
-  ],
-  prompt: "Approve publication?",
-  requestId: "approval-1",
-};
+const fixture = () =>
+  interactionFixture({
+    call: { callId: "call-1", input, name: "publish_contentful_entry" },
+  });
 const seed = () =>
   createCmaFake({
     entries: [
@@ -50,15 +42,20 @@ const seed = () =>
     ],
   });
 const deliver = (post: SlackThread["post"]) => {
-  const channel = slackEventContext({ thread: { post } });
-  return {
-    channel,
-    run: () =>
-      createInputRequestEvents(contentfulPublicationInput)["input.requested"](
-        { ...metadata, requests: [approval] },
-        channel
-      ),
+  const handler = createInteractionRenderer(contentfulPublicationInteractions)
+    .events?.["interaction.opened"];
+  if (!handler) {
+    throw new Error("The renderer must handle interaction.opened.");
+  }
+  const { event, view } = fixture();
+  const next = vi.fn<SlackRenderNext<"interaction.opened">>(() =>
+    Promise.resolve()
+  );
+  const ctx = {
+    ...rendererContext(slackEventContext({ thread: { post } })),
+    view,
   };
+  return { next, run: () => handler(event, ctx, next) };
 };
 
 beforeEach(() => testState.reset());
@@ -74,20 +71,12 @@ describe("publication card delivery", () => {
     const post = vi.fn<SlackThread["post"]>(
       async () => await { id: "card-ts", raw: { ok: true } }
     );
-    const { channel, run } = deliver(post);
+    const { next, run } = deliver(post);
     await run();
 
     expect(post).toHaveBeenCalledOnce();
-    const card = post.mock.calls[0]?.[0];
-    const serialized = JSON.stringify(card);
-    expect(serialized).toContain("Example entry");
-    expect(serialized).toContain(
-      '"action_id":"eve_input:tool-approval:approval-1:button:0"'
-    );
-    expect(serialized).toContain('"text":"Publish"');
-    expect(channel.state.pendingApprovalCards?.["approval-1"]?.messageTs).toBe(
-      "card-ts"
-    );
+    expect(JSON.stringify(post.mock.calls[0]?.[0])).toContain("Example entry");
+    expect(next).toHaveBeenCalledOnce();
     expect(cma.writes()).toHaveLength(0);
 
     expect(await publishTool.execute(input, toolContext())).toMatchObject({
@@ -105,17 +94,37 @@ describe("publication card delivery", () => {
       const cma = seed();
       expect(await request(approvalContext(input))).toBe("user-approval");
       const post = vi.fn<SlackThread["post"]>(async () => await result);
-      const { channel, run } = deliver(post);
+      const { next, run } = deliver(post);
 
       await expect(run()).rejects.toThrow("Could not confirm delivery");
       expect(post).toHaveBeenCalledOnce();
-      expect(channel.state.pendingApprovalCards).toBeUndefined();
+      expect(next).not.toHaveBeenCalled();
       await expect(publishTool.execute(input, toolContext())).rejects.toThrow(
         "not been shown"
       );
       expect(cma.writes()).toHaveLength(0);
     }
   );
+});
+
+describe("publication approval labels", () => {
+  it("labels only publication approvals Publish and Cancel", () => {
+    const { event, view } = fixture();
+    const publication = interaction(view, event.data.interactionId);
+    if (!publication) {
+      throw new Error("The fixture must record the interaction.");
+    }
+    expect(contentfulPublicationInteractions.labels?.(publication)).toEqual({
+      approve: "Publish",
+      deny: "Cancel",
+    });
+    expect(
+      contentfulPublicationInteractions.labels?.({
+        ...publication,
+        call: { ...publication.call, callId: "call-2", name: "other_tool" },
+      })
+    ).toBeUndefined();
+  });
 });
 
 beforeEach(installTestState);

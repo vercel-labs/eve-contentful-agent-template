@@ -32,16 +32,14 @@ const websiteInstructions = (): string => {
 };
 
 /**
- * Adds Contentful configuration and supported website URL patterns at each turn.
+ * Adds Contentful configuration and supported website URL patterns to the conversation.
  *
- * @remarks Configuration is resolved when the turn starts so the model can use current deployment values.
+ * @returns User-role instructions with the configured spaces, environment, locale, and website URL patterns.
+ * @remarks eve resolves dynamic instructions before each model call, so the model uses current deployment values. As a user-role instruction, it joins the conversation history once and again only when its content changes or a clear or compaction removes it.
  */
-export default defineDynamic({
-  events: {
-    "turn.started": () =>
-      defineInstructions({
-        content: `Configured Contentful spaces (alias: ID): ${JSON.stringify(configuredSpaces())}. Environment: ${environmentId()}. Locale: ${process.env.CONTENTFUL_LOCALE || "each environment's default locale"}. Answer questions about content types and fields from the search_content skill's schema tables. Before creating or editing an entry, read its content type with get_contentful_schema.\n\n${websiteInstructions()}`,
-        role: "user",
-      }),
-  },
-});
+export default defineDynamic(() =>
+  defineInstructions({
+    content: `Configured Contentful spaces (alias: ID): ${JSON.stringify(configuredSpaces())}. Environment: ${environmentId()}. Locale: ${process.env.CONTENTFUL_LOCALE || "each environment's default locale"}. Answer questions about content types and fields from the search_content skill's schema tables. Before creating or editing an entry, read its content type with get_contentful_schema.\n\n${websiteInstructions()}`,
+    role: "user",
+  })
+);
