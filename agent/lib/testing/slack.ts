@@ -13,11 +13,14 @@ import type {
   SlackInboundMessageContext,
   SlackMessage,
   SlackRendererEvents,
+  SlackRenderHandler,
   SlackRenderNext,
   SlackThread,
 } from "eve/channels/slack";
+import { emptySessionView, foldEvents } from "eve/events";
 import { vi } from "vitest";
 
+import type { JsonObject } from "../json";
 import { sessionContext } from "./session";
 
 const unsupported = (name: string) => (): never => {
@@ -104,6 +107,7 @@ export const slackThread = (
 /* The `ctx.slack` handle; `request` defaults to an `{ ok: true }` spy. */
 const slackHandle = (overrides: Partial<SlackHandle> = {}): SlackHandle => ({
   channelId: "C123",
+  codeChannel: false,
   request: vi.fn<SlackHandle["request"]>(async () => await { ok: true }),
   teamId: "T123",
   threadTs: "100.1",
@@ -133,10 +137,11 @@ export const inboundContext = ({
   cancel: unsupported("session cancellation"),
   clear: unsupported("session clearing"),
   compact: unsupported("session compaction"),
+  end: unsupported("session end"),
   isBotMentioned: vi.fn(() => mentioned),
   isDMOrPrivateChannel: vi.fn(() => Promise.resolve(false)),
   isSubscribed: vi.fn(async () => await subscribed),
-  reset: unsupported("session reset"),
+  openCodeChannel: unsupported("code channels"),
   resolveSession: unsupported("session resolution"),
   respond: unsupported("input responses"),
   send: unsupported("session sends"),
@@ -166,18 +171,33 @@ export const slackEventContext = ({
   thread: slackThread(thread),
 });
 
-type MessageCompleted = NonNullable<SlackRendererEvents["message.completed"]>;
+type ContentCompleted = SlackRenderHandler<"content.completed">;
 
-type MessageCompletedEvent = Parameters<MessageCompleted>[0];
+type ContentCompletedEvent = Parameters<ContentCompleted>[0];
 
 /**
- * Exercises a message-completed renderer while observing final reply delegation.
+ * Builds the context eve passes to a Slack renderer's event handler.
+ *
+ * @param channel - Slack channel context the handler posts through.
+ * @returns A renderer context at the first stream position with an empty session view.
+ */
+export const rendererContext = (
+  channel: SlackEventContext = slackEventContext()
+): Parameters<ContentCompleted>[1] => ({
+  ...sessionContext(),
+  channel,
+  position: { index: 0, line: 0 },
+  view: emptySessionView(),
+});
+
+/**
+ * Exercises a content-completed renderer while observing reply delegation.
  *
  * @param handler - Renderer whose posting or suppression behavior is under test.
  * @returns The channel, completion driver, post spy, and next-renderer spy.
  * @remarks The harness observes whether the chain continues without duplicating eve's own rendering.
  */
-export const messageCompletedHarness = (handler: MessageCompleted) => {
+export const contentCompletedHarness = (handler: ContentCompleted) => {
   const post = vi.fn<SlackThread["post"]>(
     async () =>
       await {
@@ -186,22 +206,110 @@ export const messageCompletedHarness = (handler: MessageCompleted) => {
       }
   );
   const channel = slackEventContext({ thread: { post } });
-  const next = vi.fn<SlackRenderNext<"message.completed">>(() =>
+  const next = vi.fn<SlackRenderNext<"content.completed">>(() =>
     Promise.resolve()
   );
-  const complete = (overrides: Partial<MessageCompletedEvent> = {}) =>
+  const complete = (
+    data: Partial<ContentCompletedEvent["data"]> = {},
+    turnId = "turn-1"
+  ) =>
     handler(
       {
-        finishReason: "stop",
-        message: "Here is the result.",
-        sequence: 1,
-        stepIndex: 2,
-        turnId: "turn-1",
-        ...overrides,
+        data: {
+          kind: "text",
+          partId: "part-1",
+          phase: "reply",
+          value: "Here is the result.",
+          ...data,
+        },
+        scope: { turnId },
+        type: "content.completed",
       },
-      channel,
-      sessionContext(),
+      rendererContext(channel),
       next
     );
   return { channel, complete, next, post };
+};
+
+type InteractionOpenedEvent = Parameters<
+  NonNullable<SlackRendererEvents["interaction.opened"]>
+>[0];
+
+interface InteractionFixtureOptions {
+  /** Tool call the request asks about; omit for a question with no call. */
+  call?: { callId: string; input: JsonObject; name: string };
+  /** Interaction ID, default `approval-1`. */
+  interactionId?: string;
+  /** What the person is asked, default a tool approval with Approve and Deny. */
+  request?: InteractionOpenedEvent["data"]["request"];
+}
+
+const DEFAULT_APPROVAL: InteractionOpenedEvent["data"]["request"] = {
+  kind: "approval",
+  options: [
+    { id: "approve", label: "Approve", style: "primary" },
+    { id: "deny", label: "Deny" },
+  ],
+  prompt: "Approve this action?",
+};
+
+/**
+ * Builds an `interaction.opened` event and the session view eve records with it.
+ *
+ * @param options - The request, its interaction ID, and the call it asks about.
+ * @returns The event and a view folded from the turn, call, and interaction facts, so `eve/events` selectors read it as eve's renderers do.
+ */
+export const interactionFixture = ({
+  call,
+  interactionId = "approval-1",
+  request = DEFAULT_APPROVAL,
+}: InteractionFixtureOptions = {}) => {
+  const scope = { turnId: "turn-1" };
+  const event: InteractionOpenedEvent = {
+    data: {
+      interactionId,
+      request,
+      subject: call ? { callId: call.callId } : { turnId: "turn-1" },
+    },
+    scope,
+    type: "interaction.opened",
+  };
+  const facts = [
+    {
+      data: {
+        cause: { deliveryId: "delivery-1" },
+        follows: null,
+        turnId: "turn-1",
+      },
+      scope,
+      type: "turn.started",
+    },
+    ...(call
+      ? [
+          {
+            data: {
+              callId: call.callId,
+              capability: { kind: "tool", name: call.name },
+              input: call.input,
+              owner: { turnId: "turn-1" },
+            },
+            scope,
+            type: "call.requested",
+          },
+        ]
+      : []),
+    event,
+  ];
+  const view = foldEvents(
+    emptySessionView(),
+    facts.map((fact, line) => ({
+      ...fact,
+      meta: {
+        at: "2026-11-16T00:00:00.000Z",
+        endOfLine: true,
+        position: { index: 0, line },
+      },
+    }))
+  );
+  return { event, view };
 };
