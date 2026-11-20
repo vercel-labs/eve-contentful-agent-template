@@ -186,6 +186,9 @@ export const rendererContext = (
 ): Parameters<ContentCompleted>[1] => ({
   ...sessionContext(),
   channel,
+  waitUntil: (task) => {
+    void task;
+  },
   position: { index: 0, line: 0 },
   view: emptySessionView(),
 });
